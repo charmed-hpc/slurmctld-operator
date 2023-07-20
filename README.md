@@ -5,7 +5,7 @@
 A [Juju](https://juju.is) operator for slurmctld - the central management daemon of [SLURM](https://slurm.schedmd.com/overview.html).
 
 [![Charmhub Badge](https://charmhub.io/slurmctld/badge.svg)](https://charmhub.io/slurmctld)
-[![CI](https://github.com/omnivector-solutions/slurmctld-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/omnivector-solutions/slurmctld/actions/workflows/ci.yaml/badge.svg)
+[![CI](https://github.com/omnivector-solutions/slurmctld-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/omnivector-solutions/slurmctld-operator/actions/workflows/ci.yaml/badge.svg)
 [![Release](https://github.com/omnivector-solutions/slurmctld-operator/actions/workflows/release.yaml/badge.svg)](https://github.com/omnivector-solutions/slurmctld-operator/actions/workflows/release.yaml/badge.svg)
 [![Matrix](https://img.shields.io/matrix/ubuntu-hpc%3Amatrix.org?logo=matrix&label=ubuntu-hpc)](https://matrix.to/#/#ubuntu-hpc:matrix.org)
 
@@ -16,6 +16,8 @@ A [Juju](https://juju.is) operator for slurmctld - the central management daemon
 The slurmctld operator provides and manages the slurmctld daemon. This operator provides the central management services required for slurmd, slurmdbd, and slurmrestd to function in Charmed SLURM deployments.
 
 ## Usage
+
+#### Deploy a minimal Charmed SLURM cluster
 
 ```shell
 $ juju deploy slurmctld --channel edge

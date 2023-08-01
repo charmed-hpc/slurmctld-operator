@@ -19,7 +19,7 @@ import pathlib
 
 import pytest
 from _pytest.config.argparsing import Parser
-from helpers import ETCD, NHC, VERSION
+from helpers import NHC, VERSION
 from pytest_operator.plugin import OpsTest
 
 
@@ -44,6 +44,5 @@ async def slurmctld_charm(ops_test: OpsTest):
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Clean up repository after test session has completed."""
-    pathlib.Path(ETCD).unlink(missing_ok=True)
     pathlib.Path(NHC).unlink(missing_ok=True)
     pathlib.Path(VERSION).unlink(missing_ok=True)

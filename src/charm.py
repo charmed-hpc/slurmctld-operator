@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import List
 
 from charms.fluentbit.v0.fluentbit import FluentbitClient
-from etcd_ops import EtcdOps
 from interface_elasticsearch import Elasticsearch
 from interface_grafana_source import GrafanaSource
-from interface_influxdb import InfluxDB, generate_password
+from interface_influxdb import InfluxDB
 from interface_prolog_epilog import PrologEpilog
 from interface_slurmctld_peer import SlurmctldPeer
 from interface_slurmd import Slurmd
@@ -47,11 +46,6 @@ class SlurmctldCharm(CharmBase):
             slurmrestd_available=False,
             slurmdbd_available=False,
             down_nodes=[],
-            etcd_configured=False,
-            etcd_root_pass=str(),
-            etcd_slurmd_pass=str(),
-            use_tls=False,
-            use_tls_ca=False,
         )
 
         self._slurm_manager = SlurmManager(self, "slurmctld")
@@ -67,8 +61,6 @@ class SlurmctldCharm(CharmBase):
         self._elasticsearch = Elasticsearch(self, "elasticsearch")
         self._fluentbit = FluentbitClient(self, "fluentbit")
 
-        self._etcd = EtcdOps(self)
-
         event_handler_bindings = {
             self.on.install: self._on_install,
             self.on.upgrade_charm: self._on_upgrade,
@@ -83,7 +75,8 @@ class SlurmctldCharm(CharmBase):
             self._slurmd.on.slurmd_departed: self._on_write_slurm_config,
             self._slurmrestd.on.slurmrestd_available: self._on_slurmrestd_available,
             self._slurmrestd.on.slurmrestd_unavailable: self._on_write_slurm_config,
-            self._slurmctld_peer.on.slurmctld_peer_available: self._on_write_slurm_config,  # NOTE: a second slurmctld should get the jwt/munge keys and configure them
+            # NOTE: a second slurmctld should get the jwt/munge keys and configure them
+            self._slurmctld_peer.on.slurmctld_peer_available: self._on_write_slurm_config,
             # fluentbit
             self.on["fluentbit"].relation_created: self._on_fluentbit_relation_created,
             # Addons lifecycle events
@@ -99,9 +92,6 @@ class SlurmctldCharm(CharmBase):
             self.on.drain_action: self._drain_nodes_action,
             self.on.resume_action: self._resume_nodes_action,
             self.on.influxdb_info_action: self._infludb_info_action,
-            self.on.etcd_get_root_password_action: self._etcd_get_root_password,
-            self.on.etcd_get_slurmd_password_action: self._etcd_get_slurmd_password,
-            self.on.etcd_create_munge_account_action: self._create_etcd_user_for_munge_key_ops,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
@@ -266,18 +256,6 @@ class SlurmctldCharm(CharmBase):
             self.unit.status = BlockedStatus("Error installing slurmctld")
             event.defer()
 
-        logger.debug("## Retrieving etcd resource to install it")
-        try:
-            etcd_path = self.model.resources.fetch("etcd")
-            logger.debug(f"## Found etcd resource: {etcd_path}")
-        except ModelError:
-            logger.error("## Missing etcd resource")
-            self.unit.status = BlockedStatus("Missing etcd resource")
-            event.defer()
-            return
-
-        self._etcd.install(etcd_path)
-
         self._check_status()
 
     def _on_fluentbit_relation_created(self, event):
@@ -291,51 +269,16 @@ class SlurmctldCharm(CharmBase):
     def _on_upgrade(self, event):
         """Perform upgrade operations."""
         self.unit.set_workload_version(Path("version").read_text().strip())
-        self._configure_etcd()
 
     def _on_update_status(self, event):
         """Handle update status."""
         self._check_status()
 
-    def _configure_etcd(self):
-        """Handle initial configuration for etcd.
-
-        - set passwords for root and slurmd account
-        - store munge key in db
-        """
-        if not self._stored.etcd_configured:
-            logger.debug("### configuring etcd")
-            self._stored.etcd_configured = True
-
-            if self._stored.etcd_root_pass == "":
-                self._stored.etcd_root_pass = generate_password()
-            if self._stored.etcd_slurmd_pass == "":
-                self._stored.etcd_slurmd_pass = generate_password()
-
-            self._etcd.configure(
-                root_pass=self._stored.etcd_root_pass, slurmd_pass=self._stored.etcd_slurmd_pass
-            )
-            self._etcd.store_munge_key(
-                root_pass=self._stored.etcd_root_pass, key=self._stored.munge_key
-            )
-
-        logger.debug("### etcd configured")
-
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         logger.debug("## slurmctld - leader elected")
 
-        self._configure_etcd()
-
-        # populate etcd with the nodelist
         slurm_config = self._assemble_slurm_config()
-        accounted_nodes = self._assemble_all_nodes(slurm_config.get("partitions", []))
-        logger.debug(f"## Sending to etcd list of accounted nodes: {accounted_nodes}")
-        self._etcd.set_list_of_accounted_nodes(self._stored.etcd_root_pass, accounted_nodes)
-
-    @property
-    def etcd_slurmd_password(self) -> str:
-        """Get the stored password for slurmd account for etcd."""
-        return self._stored.etcd_slurmd_pass
+        accounted_nodes = self._assemble_all_nodes(slurm_config.get("partitions", []))  # noqa
 
     def _check_status(self):  # noqa C901
         """Check for all relations and set appropriate status.
@@ -351,10 +294,6 @@ class SlurmctldCharm(CharmBase):
         #       to assemble slurm.conf
         if not self._stored.slurm_installed:
             self.unit.status = BlockedStatus("Error installing slurmctld")
-            return False
-
-        if self._is_leader() and not self._etcd.is_active():
-            self.unit.status = WaitingStatus("Initializing charm")
             return False
 
         if not self._slurm_manager.check_munged():
@@ -507,18 +446,6 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
-        # check if both certificates are supplied
-        tls_key = self.model.config["tls-key"]
-        tls_cert = self.model.config["tls-cert"]
-        self._stored.use_tls = bool(tls_key) and bool(tls_cert)
-        self._stored.use_tls_ca = bool(self.model.config["tls-ca-cert"])
-        logger.debug(f"## _on_write_slurm_config(): use_tls: {self._stored.use_tls}")
-        logger.debug(f"## _on_write_slurm_config(): use_tls_ca: {self._stored.use_tls_ca}")
-
-        # TODO this will fire every time a the configuration changed, we don't
-        #      need that. This should happen only if the tls configs changed
-        self._etcd.setup_tls()
-
         slurm_config = self._assemble_slurm_config()
         if slurm_config:
             self._slurm_manager.render_slurm_configs(slurm_config)
@@ -526,10 +453,6 @@ class SlurmctldCharm(CharmBase):
             # restart is needed if nodes are added/removed from the cluster
             self._slurm_manager.slurm_systemctl("restart")
             self._slurm_manager.slurm_cmd("scontrol", "reconfigure")
-
-            # send the list of hostnames to slurmd via etcd
-            accounted_nodes = self._assemble_all_nodes(slurm_config["partitions"])
-            self._etcd.set_list_of_accounted_nodes(self._stored.etcd_root_pass, accounted_nodes)
 
             # send the custom NHC parameters to all slurmd
             self._slurmd.set_nhc_params(self.config.get("health-check-params"))
@@ -656,19 +579,6 @@ class SlurmctldCharm(CharmBase):
 
         logger.debug(f"## InfluxDB-info action: {influxdb_info}")
         event.set_results({"influxdb": info})
-
-    def _etcd_get_root_password(self, event):
-        event.set_results({"username": "root", "password": self._stored.etcd_root_pass})
-
-    def _etcd_get_slurmd_password(self, event):
-        event.set_results({"username": "slurmd", "password": self._stored.etcd_slurmd_pass})
-
-    def _create_etcd_user_for_munge_key_ops(self, event):
-        """Create etcd3 account to query munge key."""
-        user = event.params.get("user")
-        pw = event.params.get("password")
-        self._etcd.create_new_munge_user(self._stored.etcd_root_pass, user, pw)
-        event.set_results({"created-new-user": user})
 
 
 if __name__ == "__main__":

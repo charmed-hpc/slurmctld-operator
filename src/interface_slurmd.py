@@ -66,12 +66,6 @@ class Slurmd(Object):
             event.defer()
             return
 
-        # check if there's a password for the slurmd account, if not, defer
-        if not self._charm.etcd_slurmd_password:
-            logger.debug("## on_relation_created - deferring: leader not elected yet")
-            event.defer()
-            return
-
         # Get the munge_key and set it to the app data on the relation to be
         # retrieved on the other side by slurmd.
         app_relation_data = event.relation.data[self.model.app]
@@ -80,16 +74,10 @@ class Slurmd(Object):
         # send the hostname and port to enable configless mode
         app_relation_data["slurmctld_host"] = self._charm.hostname
         app_relation_data["slurmctld_port"] = self._charm.port
-        app_relation_data["etcd_port"] = "2379"
 
         app_relation_data["cluster_name"] = self._charm.config.get("cluster-name")
-
         app_relation_data["nhc_params"] = self._charm.config.get("health-check-params", "#")
 
-        app_relation_data["etcd_slurmd_pass"] = self._charm.etcd_slurmd_password
-
-        app_relation_data["tls_cert"] = self._charm.model.config["tls-cert"]
-        app_relation_data["ca_cert"] = self._charm.model.config["tls-ca-cert"]
 
     def _on_relation_changed(self, event):
         """Emit slurmd available event."""
@@ -176,22 +164,6 @@ class Slurmd(Object):
             for relation in relations:
                 app = self.model.app
                 relation.data[app]["nhc_params"] = params
-        else:
-            logger.debug("## slurmd not joined")
-
-    def set_tls_settings(self):
-        """Send TLS settings to all slurmd."""
-        tls_cert = self._charm.model.config["tls-cert"]
-        ca_cert = self._charm.model.config["tls-ca-cert"]
-
-        logger.debug(f"## set_tls_settings: {bool(tls_cert)}, {bool(ca_cert)}")
-
-        if self.is_joined:
-            relations = self._charm.framework.model.relations.get(self._relation_name)
-            for relation in relations:
-                app = self.model.app
-                relation.data[app]["tls_cert"] = ca_cert
-                relation.data[app]["ca_cert"] = ca_cert
         else:
             logger.debug("## slurmd not joined")
 

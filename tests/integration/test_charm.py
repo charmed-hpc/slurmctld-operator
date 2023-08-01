@@ -42,14 +42,13 @@ async def test_build_and_deploy_against_edge(
 ) -> None:
     """Test that the slurmctld charm can stabilize against slurmd, slurmdbd, and MySQL."""
     logger.info(f"Deploying {SLURMCTLD} against {SLURMD}, {SLURMDBD}, and {DATABASE}")
-    slurmctld_res = get_slurmctld_res()
+    get_slurmctld_res()
     slurmd_res = get_slurmd_res()
     await asyncio.gather(
         ops_test.model.deploy(
             str(await slurmctld_charm),
             application_name=SLURMCTLD,
             num_units=1,
-            resources=slurmctld_res,
             base=charm_base,
         ),
         ops_test.model.deploy(
@@ -83,7 +82,6 @@ async def test_build_and_deploy_against_edge(
         ),
     )
     # Attach resources to charms.
-    await ops_test.juju("attach-resource", SLURMCTLD, f"etcd={slurmctld_res['etcd']}")
     await ops_test.juju("attach-resource", SLURMD, f"nhc={slurmd_res['nhc']}")
     # Set integrations for charmed applications.
     await ops_test.model.integrate(f"{SLURMCTLD}:{SLURMD}", f"{SLURMD}:{SLURMD}")
@@ -128,21 +126,6 @@ async def test_slurmctld_port_listen(ops_test: OpsTest) -> None:
 
 @pytest.mark.abort_on_fail
 @pytest.mark.order(4)
-@tenacity.retry(
-    wait=tenacity.wait.wait_exponential(multiplier=2, min=1, max=30),
-    stop=tenacity.stop_after_attempt(3),
-    reraise=True,
-)
-async def test_etcd_is_active(ops_test: OpsTest) -> None:
-    """Test that etcd is active inside Juju unit."""
-    logger.info("Checking that etcd is active inside Juju unit")
-    slurmctld_unit = ops_test.model.applications[SLURMCTLD].units[0]
-    res = (await slurmctld_unit.ssh("systemctl is-active etcd")).strip("\n")
-    assert res == "active"
-
-
-@pytest.mark.abort_on_fail
-@pytest.mark.order(5)
 @tenacity.retry(
     wait=tenacity.wait.wait_exponential(multiplier=2, min=1, max=30),
     stop=tenacity.stop_after_attempt(3),

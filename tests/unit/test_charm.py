@@ -122,7 +122,6 @@ class TestCharm(unittest.TestCase):
     @patch("slurm_ops_manager.SlurmManager.configure_jwt_rsa")
     @patch("slurm_ops_manager.SlurmManager.get_munge_key")
     @patch("charm.SlurmctldCharm.model.resources.fetch")
-    @patch("etcd_ops.EtcdOps.install")
     def test_install_success(self, *_) -> None:
         """Test that the on_install method works.
 
@@ -133,7 +132,6 @@ class TestCharm(unittest.TestCase):
         self.assertNotEqual(
             self.harness.charm.unit.status, BlockedStatus("Error installing slurmctld")
         )
-        self.assertNotEqual(self.harness.charm.unit.status, BlockedStatus("Missing etcd resource"))
 
     @unittest.expectedFailure
     @patch("slurm_ops_manager.SlurmManager.install", return_value=False)
@@ -149,16 +147,10 @@ class TestCharm(unittest.TestCase):
         )
 
     @patch("pathlib.Path.read_text", return_value="v1.0.0")
-    @patch("charm.SlurmctldCharm._configure_etcd")
     def test_on_upgrade(self, *_) -> None:
         """Test that the on_upgrade method works,."""
         self.harness.charm.on.upgrade_charm.emit()
         self.assertEqual(self.harness.get_workload_version(), "v1.0.0")
-
-    def test_etcd_slurmd_password(self) -> None:
-        """Test that the etcd_slurmd_password property works."""
-        self.harness.charm._stored.etcd_slurmd_pass = "test"
-        self.assertEqual(self.harness.charm.etcd_slurmd_password, "test")
 
     def test_check_status_slurm_not_installed(self) -> None:
         """Test that the check_status method works when slurm is not installed."""

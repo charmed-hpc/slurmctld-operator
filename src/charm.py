@@ -23,7 +23,7 @@ from interface_slurmrestd import Slurmrestd
 from ops.charm import CharmBase, LeaderElectedEvent
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus, BlockedStatus, ModelError, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from slurm_ops_manager import SlurmManager
 
 logger = logging.getLogger()

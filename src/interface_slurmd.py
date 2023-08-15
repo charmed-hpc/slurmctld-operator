@@ -78,7 +78,6 @@ class Slurmd(Object):
         app_relation_data["cluster_name"] = self._charm.config.get("cluster-name")
         app_relation_data["nhc_params"] = self._charm.config.get("health-check-params", "#")
 
-
     def _on_relation_changed(self, event):
         """Emit slurmd available event."""
         if event.relation.data[event.app].get("partition_info"):

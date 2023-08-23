@@ -16,8 +16,6 @@
 
 import logging
 import pathlib
-import shlex
-import subprocess
 from typing import Dict
 from urllib import request
 
@@ -25,17 +23,6 @@ logger = logging.getLogger(__name__)
 
 NHC = "lbnl-nhc-1.4.3.tar.gz"
 NHC_URL = f"https://github.com/mej/nhc/releases/download/1.4.3/{NHC}"
-VERSION = "version"
-VERSION_NUM = subprocess.run(
-    shlex.split("git describe --always"), stdout=subprocess.PIPE, text=True
-).stdout.strip("\n")
-
-
-def get_slurmctld_res() -> None:
-    """Get slurmctld resources needed for charm deployment."""
-    if not (version := pathlib.Path(VERSION)).exists():
-        logger.info(f"Setting resource {VERSION} to value {VERSION_NUM}")
-        version.write_text(VERSION_NUM)
 
 
 def get_slurmd_res() -> Dict[str, pathlib.Path]:

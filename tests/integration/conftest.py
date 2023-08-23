@@ -18,12 +18,11 @@
 import pathlib
 
 import pytest
-from _pytest.config.argparsing import Parser
-from helpers import NHC, VERSION
+from helpers import NHC
 from pytest_operator.plugin import OpsTest
 
 
-def pytest_addoption(parser: Parser) -> None:
+def pytest_addoption(parser) -> None:
     parser.addoption(
         "--charm-base", action="store", default="ubuntu@22.04", help="Charm base to test."
     )
@@ -31,7 +30,7 @@ def pytest_addoption(parser: Parser) -> None:
 
 @pytest.fixture(scope="module")
 def charm_base(request) -> str:
-    """Get slurmdbd charm base to use."""
+    """Get slurmctld charm base to use."""
     return request.config.getoption("--charm-base")
 
 
@@ -45,4 +44,3 @@ async def slurmctld_charm(ops_test: OpsTest):
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Clean up repository after test session has completed."""
     pathlib.Path(NHC).unlink(missing_ok=True)
-    pathlib.Path(VERSION).unlink(missing_ok=True)

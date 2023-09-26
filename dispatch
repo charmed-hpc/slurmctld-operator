@@ -1,6 +1,0 @@
-#!/bin/bash
-# This hook creates the dispatch executable and kicks off the operator framework.
-
-set -e
-
-JUJU_DISPATCH_PATH="${JUJU_DISPATCH_PATH:-$0}" PYTHONPATH=lib:venv ./src/charm.py

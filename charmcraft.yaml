@@ -26,6 +26,8 @@ peers:
   slurmctld-peer:
     interface: slurmctld-peer
 requires:
+  nodes:
+    interface: nodes
   slurmd:
     interface: slurmd
   slurmdbd:

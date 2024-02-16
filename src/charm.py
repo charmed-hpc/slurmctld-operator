@@ -17,6 +17,7 @@ from interface_grafana_source import GrafanaSource
 from interface_influxdb import InfluxDB
 from interface_prolog_epilog import PrologEpilog
 from interface_slurmctld_peer import SlurmctldPeer
+from interface_nodes import Nodes
 from interface_slurmd import Slurmd
 from interface_slurmdbd import Slurmdbd
 from interface_slurmrestd import Slurmrestd
@@ -46,10 +47,12 @@ class SlurmctldCharm(CharmBase):
             slurmrestd_available=False,
             slurmdbd_available=False,
             down_nodes=[],
+            nodes=str(),
         )
 
         self._slurm_manager = SlurmctldManager(self, "slurmctld")
 
+        self._nodes = Nodes(self, "nodes")
         self._slurmd = Slurmd(self, "slurmd")
         self._slurmdbd = Slurmdbd(self, "slurmdbd")
         self._slurmrestd = Slurmrestd(self, "slurmrestd")
@@ -95,6 +98,68 @@ class SlurmctldCharm(CharmBase):
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
+
+    @property
+    def nodes(self) -> dict:
+        """Return the nodes json string from stored state."""
+        return json.loads(self._stored.nodes)
+
+    @nodes.setter
+    def nodes(self, nodes: dict) -> None:
+        """Set the nodes as a dict from stored state."""
+        self._stored.nodes = json.dumps(nodes)
+
+    @property
+    def partitions(self) -> dict:
+        """Return the partitions as a dict from stored state."""
+        return json.loads(self._stored.nodes)
+
+    @partitions.setter
+    def partitions(self, partitions: dict) -> None:
+        """Set the nodes string in stored state."""
+        self._stored.partitions = json.dumps(partitions)
+
+    def add_node_config_to_partition_nodes(self, node_config: str, partition_name) -> None:
+        """Merge a node_config into the nodes stored state.
+
+        Ref: https://stackoverflow.com/a/4391722
+        """
+
+        def build_dict(seq, key):
+            return dict((d[key], dict(d, index=index)) for (index, d) in enumerate(seq))
+
+        # Add node inventory to nodes stored state object.
+        nodes = self.nodes
+        node_config = json.loads(node_config)
+
+        partition_nodes = nodes[partition_name] if nodes.get(partition_name, None) is not None else []
+
+        partition_nodes_by_node_name = build_dict(partition_nodes, key="node_name")
+        node_info = partition_nodes_by_node_name.get(node_config["node_name"])
+
+        if node_info:
+            partition_nodes[node_info["index"]] = node_config
+        else:
+            partition_nodes.append(node_config)
+       
+        nodes[partition_name] = partition_nodes
+        self.nodes = nodes
+
+        # Add node to partition nodes.
+        partitions = self.partitions
+        partitions_by_name = build_dict(partitions, key="name")
+
+        partition_info = partitions_by_name.get(partition_name)
+
+        partition_node_names = [node["node_name"] for node in nodes[partition_name]]
+
+        if not partition_info:
+            partitions.append({"name": partition_name, "nodes": partition_node_names})
+        else:
+            partitions[partition_info["index"]]["nodes"] = partition_node_names
+
+       self.partitions = partitions
+
 
     @property
     def hostname(self):

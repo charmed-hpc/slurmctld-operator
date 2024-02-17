@@ -12,12 +12,12 @@ https://slurm.schedmd.com/slurm.conf.html#SECTION_NODE-CONFIGURATION.
 Example `node_config`:
 
 {
-    'node_name': 'compute-gpu-0',
-    'node_addr': '10.204.129.33',
-    'real_memory': '64012',
-    'cpus': '2',
-    'state': 'UNKNOWN',
-    'sockets': '2'
+    'NodeName': 'compute-gpu-0',
+    'NodeAddr': '10.204.129.33',
+    'RealMemory': '64012',
+    'CPUs': '2',
+    'State': 'UNKNOWN',
+    'Sockets': '2'
 {
 
 """
@@ -65,33 +65,22 @@ class Nodes(Object):
             self._charm.on[self._relation_name].relation_changed,
             self._on_relation_changed,
         )
-        self.framework.observe(
-            self._charm.on[self._relation_name].relation_departed,
-            self._on_relation_departed,
-        )
-        self.framework.observe(
-            self._charm.on[self._relation_name].relation_broken,
-            self._on_relation_broken,
-        )
 
     def _on_relation_changed(self, event):
         """Get relation data for nodes that have joined."""
         unit_relation_data = event.relation.data[event.unit]
-        node_config = unit_relation_data["node_config"]
-        partition_name = unit_relation_data["partition_name"]
 
-        if node_config:
-            self._charm.add_node_config_to_nodes(node_config, partition_name)
+        if node := unit_relation_data.get("node"):
+            self._charm.add_node_config_to_partition_nodes(json.loads(node))
             self.on.node_available.emit()
 
     def _on_relation_departed(self, event):
         """Emit the node_departed event and remove node from the nodes."""
         unit_relation_data = event.relation.data[event.unit]
-        node_config = unit_relation_data["node_config"]
-        partition_name = unit_relation_data["partition_name"]
+        node_config = unit_relation_data.get("node")
 
-        if node_config:
-            self._charm._remove_node_config_from_nodes(node_config, partition_name)
+        if node:
+            self._charm._remove_node_config_from_nodes(json.loads(node))
             self.on.node_departed.emit()
 
     def _on_relation_broken(self, event):

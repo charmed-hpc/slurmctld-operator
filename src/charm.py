@@ -5,6 +5,7 @@
 """SlurmctldCharm."""
 
 import copy
+import json
 import logging
 import shlex
 import subprocess
@@ -47,7 +48,7 @@ class SlurmctldCharm(CharmBase):
             slurmrestd_available=False,
             slurmdbd_available=False,
             down_nodes=[],
-            nodes=str(),
+            partition_nodes={},
         )
 
         self._slurm_manager = SlurmctldManager(self, "slurmctld")
@@ -100,26 +101,24 @@ class SlurmctldCharm(CharmBase):
             self.framework.observe(event, handler)
 
     @property
-    def nodes(self) -> dict:
-        """Return the nodes json string from stored state."""
-        return json.loads(self._stored.nodes)
+    def partition_nodes(self) -> dict:
+        """Return the partition_nodes list from stored state."""
+        return self._stored.partition_nodes
 
-    @nodes.setter
-    def nodes(self, nodes: dict) -> None:
-        """Set the nodes as a dict from stored state."""
-        self._stored.nodes = json.dumps(nodes)
+    @partition_nodes.setter
+    def partition_nodes(self, nodes: dict) -> None:
+        """Return the partition_nodes from stored state.
 
-    @property
-    def partitions(self) -> dict:
-        """Return the partitions as a dict from stored state."""
-        return json.loads(self._stored.nodes)
+        partition_nodes = {
+            "mypartitionA": [{"NodeName": "ratA.1234"}, {"NodeName": "ratA.12345"}],
+            "mypartitionB": [{"NodeName": "ratB.1234"}, {"NodeName": "ratB.12345"}]
+        {
 
-    @partitions.setter
-    def partitions(self, partitions: dict) -> None:
-        """Set the nodes string in stored state."""
-        self._stored.partitions = json.dumps(partitions)
+        """
+        logger.info(nodes)
+        self._stored.partition_nodes = nodes
 
-    def add_node_config_to_partition_nodes(self, node_config: str, partition_name) -> None:
+    def add_node_config_to_partition_nodes(self, node: dict) -> None:
         """Merge a node_config into the nodes stored state.
 
         Ref: https://stackoverflow.com/a/4391722
@@ -128,37 +127,39 @@ class SlurmctldCharm(CharmBase):
         def build_dict(seq, key):
             return dict((d[key], dict(d, index=index)) for (index, d) in enumerate(seq))
 
-        # Add node inventory to nodes stored state object.
-        nodes = self.nodes
-        node_config = json.loads(node_config)
+        partition_nodes = self.partition_nodes
 
-        partition_nodes = nodes[partition_name] if nodes.get(partition_name, None) is not None else []
+        node_config = node["node_config"]
+        partition_name = node["partition_name"]
 
-        partition_nodes_by_node_name = build_dict(partition_nodes, key="node_name")
-        node_info = partition_nodes_by_node_name.get(node_config["node_name"])
+        if nodes := self.partition_nodes.get(partition_name):
+            partition_nodes_by_node_name = build_dict(nodes, key="NodeName")
+            node_info = partition_nodes_by_node_name.get(node_config["NodeName"], None)
 
-        if node_info:
-            partition_nodes[node_info["index"]] = node_config
+            if node_info is not None:
+                partition_nodes[partition_name][node_info["index"]] = node_config
+
+            else:
+                partition_nodes[partition_name].append(node_config)
         else:
-            partition_nodes.append(node_config)
-       
-        nodes[partition_name] = partition_nodes
-        self.nodes = nodes
+            partition_nodes[partition_name] = [node_config]
+      
+        self.partition_nodes = partition_nodes
 
         # Add node to partition nodes.
-        partitions = self.partitions
-        partitions_by_name = build_dict(partitions, key="name")
+        #partitions = self.partitions
+        #partitions_by_name = build_dict(partitions, key="name")
 
-        partition_info = partitions_by_name.get(partition_name)
+        #partition_info = partitions_by_name.get(partition_name)
 
-        partition_node_names = [node["node_name"] for node in nodes[partition_name]]
+        #partition_node_names = [node["node_name"] for node in nodes[partition_name]]
 
-        if not partition_info:
-            partitions.append({"name": partition_name, "nodes": partition_node_names})
-        else:
-            partitions[partition_info["index"]]["nodes"] = partition_node_names
+        #if not partition_info:
+        #    partitions.append({"name": partition_name, "nodes": partition_node_names})
+        #else:
+        #    partitions[partition_info["index"]]["nodes"] = partition_node_names
 
-       self.partitions = partitions
+       #self.partitions = partitions
 
 
     @property
@@ -463,6 +464,7 @@ class SlurmctldCharm(CharmBase):
         logger.debug(f"#### Down nodes: {down_nodes}")
 
         return {
+            #"nodes": self.partition_nodes,
             "partitions": partitions_info,
             "down_nodes": down_nodes,
             **slurmctld_info,
@@ -540,7 +542,7 @@ class SlurmctldCharm(CharmBase):
         nodes = []
         for partition in slurmd_info:
             for node in partition["inventory"]:
-                nodes.append(node["node_name"])
+                nodes.append(node["NodeName"])
         return nodes
 
     @staticmethod
@@ -550,7 +552,7 @@ class SlurmctldCharm(CharmBase):
         for partition in slurmd_info:
             for node in partition["inventory"]:
                 if node["new_node"]:
-                    down_nodes.append(node["node_name"])
+                    down_nodes.append(node["NodeName"])
 
         return down_nodes
 

@@ -192,7 +192,7 @@ def ensure_unique_partitions(partitions):
 
         inventory = partition_tmp["inventory"]
 
-        unique_inventory = list({node["node_name"]: node for node in inventory}.values())
+        unique_inventory = list({node["NodeName"]: node for node in inventory}.values())
 
         partition_tmp["inventory"] = unique_inventory
         partitions.append(partition_tmp)

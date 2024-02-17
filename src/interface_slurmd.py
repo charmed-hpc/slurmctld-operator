@@ -139,12 +139,12 @@ class Slurmd(Object):
 
                 partition_info = json.loads(relation.data[app].get("partition_info"))
 
-                for unit in units:
-                    inv = relation.data[unit].get("inventory")
-                    if inv:
-                        inventory.append(json.loads(inv))
+                #for unit in units:
+                #    inv = relation.data[unit].get("inventory")
+                #    if inv:
+                #        inventory.append(json.loads(inv))
 
-                partition_info["inventory"] = inventory.copy()
+                partition_info["inventory"] = inventory
                 partitions.append(partition_info)
 
         return ensure_unique_partitions(partitions)

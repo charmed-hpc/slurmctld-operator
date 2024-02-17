@@ -91,6 +91,7 @@ class SlurmctldCharm(CharmBase):
             self._influxdb.on.influxdb_unavailable: self._on_write_slurm_config,
             self._elasticsearch.on.elasticsearch_available: self._on_elasticsearch_available,
             self._elasticsearch.on.elasticsearch_unavailable: self._on_write_slurm_config,
+            self._nodes.on.node_available: self._on_node_available,
             # actions
             self.on.show_current_config_action: self._on_show_current_config,
             self.on.drain_action: self._drain_nodes_action,
@@ -99,6 +100,10 @@ class SlurmctldCharm(CharmBase):
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
+
+    def _on_node_available(self, event) -> None:
+        """Trigger a configuration rendering."""
+        self._on_write_slurm_config(event)
 
     @property
     def partition_nodes(self) -> dict:
@@ -422,6 +427,13 @@ class SlurmctldCharm(CharmBase):
             # Extract the partition_name from the partition.
             partition_name = partition["partition_name"]
 
+            inventory = []
+
+            for node in self.partition_nodes.get(partition_name):
+                if node.get("new_node"):
+                    del node["new_node"]
+                inventory.append(node)
+
             # Check that the default_partition isn't defined in the charm
             # config.
             # If the user hasn't provided a default partition, then we infer
@@ -430,6 +442,8 @@ class SlurmctldCharm(CharmBase):
             if default_partition_from_config:
                 if default_partition_from_config == partition_name:
                     partition_tmp["partition_default"] = "YES"
+
+            partition_tmp["inventory"] = inventory
 
             slurmd_info_tmp.remove(partition)
             slurmd_info_tmp.append(partition_tmp)

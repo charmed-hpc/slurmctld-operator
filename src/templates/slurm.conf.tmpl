@@ -103,8 +103,7 @@ GresTypes=gpu
 # Enumerate nodes and partitions
 {% for partition in partitions %}
 {% for node in partition.inventory %}
-
-NodeName={{node.NodeName}} NodeAddr={{node.NodeAddr}} State={{node.State}} RealMemory={{node.RealMemory}} CPUs={{node.CPUs}} ThreadsPerCore={{node.ThreadsPerCore}} CoresPerSocket={{node.CoresPerSocket}} SocketsPerBoard={{node.SocketsPerBoard}} {{ "Gres=%s" % node.Gres if node.Gres else ""}}
+{% for k,v in node.items() %} {{k}}={{v}} {% endfor %}
 {%- endfor %}
 
 PartitionName={{partition.partition_name}} Nodes={% for slurmd in partition.inventory %}{{slurmd.NodeName}}{{ "," if not loop.last}}{% endfor %} Default={{ 'YES' if partition.partition_default else 'NO' }} State={{partition.partition_state}} {{partition.partition_config if partition.partition_config else ""}}

@@ -231,7 +231,7 @@ class SlurmctldManager(Object):
         return Path("/etc/munge/munge.key")
 
     @property
-    def _munge_socket(self) -> Path:
+    def munge_socket(self) -> Path:
         """Return the munge socket."""
         return Path("/var/run/munge/munge.socket.2")
 
@@ -306,14 +306,6 @@ class SlurmctldManager(Object):
 
         shutil.copyfile(systemd_override_conf_tmpl, systemd_override_conf)
 
-    def slurm_config_nhc_values(self, interval=600, state="ANY,CYCLE"):
-        """NHC parameters for slurm.conf."""
-        return {
-            "nhc_bin": "/usr/sbin/omni-nhc-wrapper",
-            "health_check_interval": interval,
-            "health_check_node_state": state,
-        }
-
     def write_acct_gather_conf(self, context: dict) -> None:
         """Render the acct_gather.conf."""
         template_name = "acct_gather.conf.tmpl"
@@ -341,47 +333,35 @@ class SlurmctldManager(Object):
         if target.exists():
             target.unlink()
 
-    def write_slurm_config(self, context) -> None:
-        """Render the context to a template, adding in common configs."""
-        common_config = {
-            "munge_socket": str(self._munge_socket),
-            "mail_prog": str(self._mail_prog),
-            "slurm_state_dir": str(self._slurm_state_dir),
-            "slurm_spool_dir": str(self._slurm_spool_dir),
-            "slurm_plugin_dir": str(self._slurm_plugin_dir),
-            "slurmd_log_file": str(self._slurmd_log_file),
-            "slurmctld_log_file": str(self._slurmctld_log_file),
-            "slurmd_pid_file": str(self._slurmd_pid_file),
-            "slurmctld_pid_file": str(self._slurmctld_pid_file),
-            "jwt_rsa_key_file": str(self._jwt_rsa_key_file),
-            "slurmctld_parameters": ",".join(self._slurmctld_parameters),
-            "slurm_plugstack_conf": str(self._slurm_plugstack_conf),
-            "slurm_user": str(self._slurm_user),
-            "slurmd_user": str(self._slurmd_user),
+    def get_charm_maintained_slurm_config_parameters(self):
+        """Return slurm.conf parameters maintained my this charm."""
+        return {
+            "AuthInfo": f"socket={self.munge_socket}",
+            "MailProg": f"{self._mail_prog}",
+            "StateSaveLocation": f"{self._slurm_state_dir}",
+            "SlurmdSpoolDir": f"{self._slurm_spool_dir}",
+            "PluginDir": f"{self._slurm_plugin_dir}",
+            "SlurmdLogFile": f"{self._slurmd_log_file}",
+            "SlurmctldLogFile": f"{self._slurmctld_log_file}",
+            "SlurmdPidFile": f"{self._slurmd_pid_file}",
+            "SlurmctldPidFile": f"{self._slurmctld_pid_file}",
+            "AuthAltParameters": f"jwt_key={self._jwt_rsa_key_file}",
+            "PlugStackConfig": f"{self._slurm_plugstack_conf}",
+            "SlurmUser": self._slurm_user,
+            "SlurmdUser": self._slurmd_user,
         }
 
+    def write_slurm_conf(self, slurm_conf: dict) -> None:
+        """Render the context to a template, adding in common configs."""
         template_name = self._slurm_conf_template_name
         source = self._slurm_conf_template_location
         target = self._slurm_conf_path
 
-        if not isinstance(context, dict):
+        if not isinstance(slurm_conf, dict):
             raise TypeError("Incorrect type for config.")
 
         if not source.exists():
             raise FileNotFoundError("The slurm config template cannot be found.")
-
-        # Preprocess merging slurmctld_parameters if they exist in the context
-        context_slurmctld_parameters = context.get("slurmctld_parameters")
-        if context_slurmctld_parameters:
-            slurmctld_parameters = list(
-                set(
-                    common_config["slurmctld_parameters"].split(",")
-                    + context_slurmctld_parameters.split(",")
-                )
-            )
-
-            common_config["slurmctld_parameters"] = ",".join(slurmctld_parameters)
-            context.pop("slurmctld_parameters")
 
         rendered_template = Environment(loader=FileSystemLoader(TEMPLATE_DIR)).get_template(
             template_name
@@ -390,7 +370,7 @@ class SlurmctldManager(Object):
         if target.exists():
             target.unlink()
 
-        target.write_text(rendered_template.render({**context, **common_config}))
+        target.write_text(rendered_template.render(slurm_conf))
 
         user_group = f"{self._slurm_user}:{self._slurm_group}"
         subprocess.call(["chown", user_group, target])
@@ -422,6 +402,8 @@ class SlurmctldManager(Object):
     def write_cgroup_conf(self, content):
         """Write the cgroup.conf file."""
         cgroup_conf_path = self._slurm_conf_dir / "cgroup.conf"
+        if cgroup_conf_path.exists():
+            cgroup_conf_path.unlink()
         cgroup_conf_path.write_text(content)
 
     def get_munge_key(self) -> str:
@@ -672,17 +654,10 @@ class SlurmctldManager(Object):
 
         return True
 
-    def render_slurm_configs(self, slurm_config) -> None:
+    def render_slurm_conf(self, slurm_config) -> None:
         """Render the slurm.conf and munge key, restart slurm and munge."""
         if not isinstance(slurm_config, dict):
             raise TypeError("Incorrect type for config.")
-
-        # cgroup config will not always exist. We need to check for
-        # cgroup_config and only write the cgroup.conf if
-        # cgroup_config exists in the slurm_config object.
-        if slurm_config.get("cgroup_config"):
-            cgroup_config = slurm_config["cgroup_config"]
-            self.write_cgroup_conf(cgroup_config)
 
         # acct_gather config will not always exist. We need to check for
         # acct_gather and only write the acct_gather.conf if we have

@@ -41,20 +41,15 @@ class TestCharm(unittest.TestCase):
         """Test that the cluster_name property works."""
         self.assertEqual(self.harness.charm.cluster_name, "osd-cluster")
 
-    @patch("interface_slurmctld_peer.SlurmctldPeer.get_slurmctld_info", return_value={})
+    @patch("interface_slurmctld_peer.SlurmctldPeer.get_slurmctld_info", return_value=([], {}, {}))
     def test_slurmctld_info(self, info) -> None:
         """Test that the slurmctld_info property works."""
-        self.assertEqual(self.harness.charm._slurmctld_info, info.return_value)
+        self.assertEqual(self.harness.charm._slurmctld_parameters, info.return_value)
 
     @patch("interface_slurmdbd.Slurmdbd.get_slurmdbd_info", return_value={})
-    def test_slurmdbd_info(self, info) -> None:
+    def test_slurmdbd_parameters(self, info) -> None:
         """Test that the slurmdbd_info property works."""
-        self.assertEqual(self.harness.charm.slurmdbd_info, info.return_value)
-
-    @patch("interface_slurmd.Slurmd.get_slurmd_info", return_value={})
-    def test_slurmd_info(self, info) -> None:
-        """Test that the slurmd_info property works."""
-        self.assertEqual(self.harness.charm._slurmd_info, info.return_value)
+        self.assertEqual(self.harness.charm._slurmdbd_parameters, info.return_value)
 
     def test_cluster_info(self) -> None:
         """Test the cluster_info property works."""

@@ -4,12 +4,9 @@
 
 """SlurmctldCharm."""
 
-import copy
 import logging
 import shlex
 import subprocess
-from pathlib import Path
-from typing import List
 
 from charms.fluentbit.v0.fluentbit import FluentbitClient
 from interface_elasticsearch import Elasticsearch
@@ -20,7 +17,7 @@ from interface_slurmctld_peer import SlurmctldPeer
 from interface_slurmd import Slurmd
 from interface_slurmdbd import Slurmdbd
 from interface_slurmrestd import Slurmrestd
-from ops.charm import CharmBase, LeaderElectedEvent
+from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
@@ -66,7 +63,6 @@ class SlurmctldCharm(CharmBase):
             self.on.upgrade_charm: self._on_upgrade,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_write_slurm_config,
-            self.on.leader_elected: self._on_leader_elected,
             # slurm component lifecycle events
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
@@ -92,137 +88,12 @@ class SlurmctldCharm(CharmBase):
             self.on.drain_action: self._drain_nodes_action,
             self.on.resume_action: self._resume_nodes_action,
             self.on.influxdb_info_action: self._infludb_info_action,
+            self.on.config_debug_action: self._config_debug_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
 
-    @property
-    def hostname(self):
-        """Return the hostname."""
-        return self._slurm_manager.hostname
-
-    @property
-    def port(self):
-        """Return the port."""
-        return self._slurm_manager.port
-
-    @property
-    def cluster_name(self) -> str:
-        """Return the cluster name."""
-        return self.config.get("cluster-name")
-
-    @property
-    def _slurmctld_info(self):
-        return self._slurmctld_peer.get_slurmctld_info()
-
-    @property
-    def slurmdbd_info(self):
-        """Return slurmdbd_info from relation."""
-        return self._slurmdbd.get_slurmdbd_info()
-
-    @property
-    def _slurmd_info(self) -> list:
-        return self._slurmd.get_slurmd_info()
-
-    @property
-    def _cluster_info(self):
-        """Assemble information about the cluster."""
-        cluster_info = {}
-        cluster_info["cluster_name"] = self.config.get("cluster-name")
-        cluster_info["custom_config"] = self.config.get("custom-config")
-        cluster_info["proctrack_type"] = self.config.get("proctrack-type")
-        cluster_info["cgroup_config"] = self.config.get("cgroup-config")
-
-        interval = self.config.get("health-check-interval")
-        state = self.config.get("health-check-state")
-        nhc = self._slurm_manager.slurm_config_nhc_values(interval, state)
-        cluster_info.update(nhc)
-
-        return cluster_info
-
-    @property
-    def _addons_info(self):
-        """Assemble addons for slurm.conf."""
-        return {
-            **self._assemble_prolog_epilog(),
-            **self._assemble_acct_gather_addon(),
-            **self._assemble_elastic_search_addon(),
-        }
-
-    def _assemble_prolog_epilog(self) -> dict:
-        """Generate the prolog_epilog section of the addons."""
-        logger.debug("## Generating prolog epilog configuration")
-
-        prolog_epilog = self._prolog_epilog.get_prolog_epilog()
-
-        if prolog_epilog:
-            return {"prolog_epilog": prolog_epilog}
-        else:
-            return {}
-
-    def _assemble_acct_gather_addon(self):
-        """Generate the acct gather section of the addons."""
-        logger.debug("## Generating acct gather configuration")
-
-        addons = {}
-
-        influxdb_info = self._get_influxdb_info()
-        if influxdb_info:
-            addons["acct_gather"] = influxdb_info
-            addons["acct_gather"]["default"] = "all"
-            addons["acct_gather_profile"] = "acct_gather_profile/influxdb"
-
-        # it is possible to setup influxdb or hdf5 profiles without the
-        # relation, using the custom-config section of slurm.conf. We need to
-        # support setting up the acct_gather configuration for this scenario
-        acct_gather_custom = self.config.get("acct-gather-custom")
-        if acct_gather_custom:
-            if not addons.get("acct_gather"):
-                addons["acct_gather"] = {}
-
-            addons["acct_gather"]["custom"] = acct_gather_custom
-
-        addons["acct_gather_frequency"] = self.config.get("acct-gather-frequency")
-
-        return addons
-
-    def _assemble_elastic_search_addon(self):
-        """Generate the acct gather section of the addons."""
-        logger.debug("## Generating elastic search addon configuration")
-        addon = {}
-
-        elasticsearch_ingress = self._elasticsearch.elasticsearch_ingress
-        if elasticsearch_ingress:
-            suffix = f"/{self.cluster_name}/jobcomp"
-            addon = {"elasticsearch_address": f"{elasticsearch_ingress}{suffix}"}
-
-        return addon
-
-    def set_slurmd_available(self, flag: bool):
-        """Set stored value of slurmd available."""
-        self._stored.slurmd_available = flag
-
-    def _set_slurmdbd_available(self, flag: bool):
-        """Set stored value of slurmdbd available."""
-        self._stored.slurmdbd_available = flag
-
-    def set_slurmrestd_available(self, flag: bool):
-        """Set stored value of slurmdrest available."""
-        self._stored.slurmrestd_available = flag
-
-    def _is_leader(self):
-        return self.model.unit.is_leader()
-
-    def is_slurm_installed(self):
-        """Return true/false based on whether or not slurm is installed."""
-        return self._stored.slurm_installed
-
-    def _on_show_current_config(self, event):
-        """Show current slurm.conf."""
-        slurm_conf = self._slurm_manager.slurm_conf_path.read_text()
-        event.set_results({"slurm.conf": slurm_conf})
-
-    def _on_install(self, event):
+    def _on_install(self, event) -> None:
         """Perform installation operations for slurmctld."""
         self.unit.status = WaitingStatus("Installing slurmctld")
 
@@ -257,7 +128,20 @@ class SlurmctldCharm(CharmBase):
 
         self._check_status()
 
-    def _on_fluentbit_relation_created(self, event):
+    def _on_upgrade(self, event) -> None:
+        """Perform upgrade operations."""
+        self.unit.set_workload_version(self._slurm_manager.version())
+
+    def _on_update_status(self, event) -> None:
+        """Handle update status."""
+        self._check_status()
+
+    def _on_show_current_config(self, event) -> None:
+        """Show current slurm.conf."""
+        slurm_conf = self._slurm_manager.slurm_conf_path.read_text()
+        event.set_results({"slurm.conf": slurm_conf})
+
+    def _on_fluentbit_relation_created(self, event) -> None:
         """Set up Fluentbit log forwarding."""
         logger.debug("## Configuring fluentbit")
         cfg = []
@@ -265,19 +149,347 @@ class SlurmctldCharm(CharmBase):
         cfg.extend(self._slurm_manager.fluentbit_config_slurm)
         self._fluentbit.configure(cfg)
 
-    def _on_upgrade(self, event):
-        """Perform upgrade operations."""
-        self.unit.set_workload_version(Path("version").read_text().strip())
-
-    def _on_update_status(self, event):
-        """Handle update status."""
-        self._check_status()
-
-    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
-        logger.debug("## slurmctld - leader elected")
+    def _on_slurmrestd_available(self, event) -> None:
+        """Set slurm_config on the relation when slurmrestd available."""
+        if not self._check_status():
+            event.defer()
+            return
 
         slurm_config = self._assemble_slurm_config()
-        accounted_nodes = self._assemble_all_nodes(slurm_config.get("partitions", []))  # noqa
+
+        if not slurm_config:
+            self.unit.status = BlockedStatus("Cannot generate slurm_config - deferring event.")
+            event.defer()
+            return
+
+    def _on_slurmdbd_available(self, event) -> None:
+        self._set_slurmdbd_available(True)
+        self._on_write_slurm_config(event)
+
+    def _on_slurmdbd_unavailable(self, event) -> None:
+        self._set_slurmdbd_available(False)
+        self._check_status()
+
+    def _on_grafana_available(self, event) -> None:
+        """Create the grafana-source if we are the leader and have influxdb."""
+        if not self._is_leader():
+            return
+
+        influxdb_info = self._get_influxdb_info()
+
+        if influxdb_info:
+            self._grafana.set_grafana_source_info(influxdb_info)
+        else:
+            logger.error("## Can not set Grafana source: missing influxdb relation")
+
+    def _on_influxdb_available(self, event) -> None:
+        """Assemble addons to forward slurm data to influxdb."""
+        self._on_write_slurm_config(event)
+
+    def _on_elasticsearch_available(self, event) -> None:
+        """Assemble addons to forward Slurm data to elasticsearch."""
+        self._on_write_slurm_config(event)
+
+    def _get_influxdb_info(self) -> dict:
+        """Return influxdb info."""
+        return self._influxdb.get_influxdb_info()
+
+    def _drain_nodes_action(self, event) -> None:
+        """Drain specified nodes."""
+        nodes = event.params["nodename"]
+        reason = event.params["reason"]
+
+        logger.debug(f"#### Draining {nodes} because {reason}.")
+        event.log(f"Draining {nodes} because {reason}.")
+
+        try:
+            cmd = f'scontrol update nodename={nodes} state=drain reason="{reason}"'
+            subprocess.check_output(shlex.split(cmd))
+            event.set_results({"status": "draining", "nodes": nodes})
+        except subprocess.CalledProcessError as e:
+            event.fail(message=f"Error draining {nodes}: {e.output}")
+
+    def _resume_nodes_action(self, event) -> None:
+        """Resume specified nodes."""
+        nodes = event.params["nodename"]
+
+        logger.debug(f"#### Resuming {nodes}.")
+        event.log(f"Resuming {nodes}.")
+
+        try:
+            cmd = f"scontrol update nodename={nodes} state=resume"
+            subprocess.check_output(shlex.split(cmd))
+            event.set_results({"status": "resuming", "nodes": nodes})
+        except subprocess.CalledProcessError as e:
+            event.fail(message=f"Error resuming {nodes}: {e.output}")
+
+    def _infludb_info_action(self, event) -> None:
+        influxdb_info = self._get_influxdb_info()
+
+        if not influxdb_info:
+            info = "not related"
+        else:
+            # Juju does not like underscores in dictionaries
+            info = {k.replace("_", "-"): v for k, v in influxdb_info.items()}
+
+        logger.debug(f"## InfluxDB-info action: {influxdb_info}")
+        event.set_results({"influxdb": info})
+
+    def _config_debug_action(self, event) -> None:
+        """Debug slurmd relation data."""
+        down_nodes, nodes, partitions = self._slurmd.get_down_nodes_and_nodes_and_partitions()
+
+        logger.debug("######## SLURMD Relation Data")
+        logger.debug(f"## DownNodes: {down_nodes}")
+        logger.debug(f"## Nodes: {nodes}")
+        logger.debug(f"## Partitions: {partitions}")
+
+    def _on_write_slurm_config(self, event) -> None:
+        """Check that we have what we need before we proceed."""
+        logger.debug("### Slurmctld - _on_write_slurm_config()")
+
+        # only the leader should write the config, restart, and scontrol reconf
+        if not self._is_leader():
+            return
+
+        if not self._check_status():
+            event.defer()
+            return
+
+        if slurm_config := self._assemble_slurm_config():
+            self._slurm_manager.write_slurm_conf(slurm_config)
+
+            # Write out any user_supplied_cgroup_parameters to /etc/slurm/cgroup.conf.
+            if user_supplied_cgroup_parameters := self.config.get("cgroup-parameters"):
+                self._slurm_manager.write_cgroup_conf(user_supplied_cgroup_parameters)
+
+            # Restart is needed if nodes are added/removed from the cluster.
+            self._slurm_manager.restart_slurmctld()
+            self._slurm_manager.slurm_cmd("scontrol", "reconfigure")
+
+            # send the custom NHC parameters to all slurmd
+            self._slurmd.set_nhc_params(self.config.get("health-check-params"))
+
+            # check for "not new anymore" nodes, i.e., nodes that run the
+            # node-configured action. Those nodes are not anymore in the
+            # DownNodes section in the slurm.conf, but we need to resume them
+            # manually and update the internal cache
+            if down_node_names := self._get_down_node_names(slurm_config):
+                logger.debug(f"### down_node_names: {down_node_names}")
+
+                configured_nodes = self._assemble_configured_nodes(down_node_names)
+                logger.debug(f"### configured nodes: {configured_nodes}")
+
+                self._resume_nodes(configured_nodes)
+                self._stored.down_nodes = down_node_names.copy()
+
+            # slurmrestd needs the slurm.conf file, so send it every time it changes
+            if self._stored.slurmrestd_available:
+                self._slurmrestd.set_slurm_config_on_app_relation_data(slurm_config)
+                # NOTE: scontrol reconfigure does not restart slurmrestd
+                self._slurmrestd.restart_slurmrestd()
+        else:
+            logger.debug("## Should rewrite slurm.conf, but we don't have it. " "Deferring.")
+            event.defer()
+
+    @property
+    def hostname(self) -> str:
+        """Return the hostname."""
+        return self._slurm_manager.hostname
+
+    @property
+    def port(self) -> str:
+        """Return the port."""
+        return self._slurm_manager.port
+
+    @property
+    def cluster_name(self) -> str:
+        """Return the cluster name."""
+        return self.config.get("cluster-name")
+
+    def _get_user_supplied_parameters(self) -> dict:
+        """Gather, parse, and return the user supplied parameters."""
+        user_supplied_parameters = {}
+        if custom_config := self.config.get("slurm-conf-parameters"):
+            user_supplied_parameters = {
+                line.split("=")[0]: line.split("=")[1]
+                for line in custom_config.split("\n")
+                if "#" not in line and line != ""
+            }
+        return user_supplied_parameters
+
+    def _get_addons_info(self) -> dict:
+        """Assemble addons for slurm.conf."""
+        return {
+            **self._assemble_prolog_epilog(),
+            **self._assemble_acct_gather_addon(),
+            **self._assemble_elastic_search_addon(),
+        }
+
+    def _assemble_prolog_epilog(self) -> dict:
+        """Generate the prolog_epilog section of the addons."""
+        logger.debug("## Generating prolog epilog configuration")
+
+        prolog_epilog = self._prolog_epilog.get_prolog_epilog()
+
+        if prolog_epilog:
+            return {"prolog_epilog": prolog_epilog}
+        else:
+            return {}
+
+    def _assemble_acct_gather_addon(self) -> dict:
+        """Generate the acct gather section of the addons."""
+        logger.debug("## Generating acct gather configuration")
+
+        addons = {}
+        addons["AcctGatherProfileType"] = "acct_gather_profile/none"
+
+        if influxdb_info := self._get_influxdb_info():
+            addons["acct_gather"] = influxdb_info
+            addons["acct_gather"]["default"] = "all"
+            addons["AcctGatherProfileType"] = "acct_gather_profile/influxdb"
+
+        # it is possible to setup influxdb or hdf5 profiles without the
+        # relation, using the custom-config section of slurm.conf. We need to
+        # support setting up the acct_gather configuration for this scenario
+        acct_gather_custom = self.config.get("acct-gather-custom")
+        if acct_gather_custom:
+            if not addons.get("acct_gather"):
+                addons["acct_gather"] = {}
+
+            addons["acct_gather"]["custom"] = acct_gather_custom
+
+        addons["JobAcctGatherFrequency"] = self.config.get("acct-gather-frequency")
+
+        return addons
+
+    def _assemble_elastic_search_addon(self) -> dict:
+        """Generate the acct gather section of the addons."""
+        logger.debug("## Generating elastic search addon configuration")
+        addon = {}
+
+        elasticsearch_ingress = self._elasticsearch.elasticsearch_ingress
+        if elasticsearch_ingress:
+            suffix = f"/{self.cluster_name}/jobcomp"
+            addon = {"elasticsearch_address": f"{elasticsearch_ingress}{suffix}"}
+        return addon
+
+    def _assemble_configured_nodes(self, down_node_names) -> list:
+        """Assemble list of nodes that are not new anymore.
+
+        new_node status is removed with an action, this method returns a list
+        of nodes that were previously new but are not anymore.
+        """
+        configured_nodes = []
+        for node in self._stored.down_nodes:
+            if node not in down_node_names:
+                configured_nodes.append(node)
+        return configured_nodes
+
+    def _get_down_node_names(self, slurm_config: dict) -> list:
+        """Given the slurm_config, return the down_node node names."""
+        down_node_names = []
+        if down_nodes_from_slurm_config := slurm_config.get("down_nodes"):
+            for down_nodes_entry in down_nodes_from_slurm_config:
+                for down_node_name in down_nodes_entry["DownNodes"]:
+                    down_node_names.append(down_node_name)
+        return down_node_names
+
+    def _get_slurmdbd_parameters(self) -> dict:
+        """Return the slurmdbd parameters for the slurm.conf."""
+        slurmdbd_parameters = {}
+        if slurmdbd_info := self._slurmdbd.get_slurmdbd_info():
+            slurmdbd_parameters = {
+                "AccountingStorageType": "accounting_storage/slurmdbd",
+                "AccountingStorageHost": slurmdbd_info["active_slurmdbd_hostname"],
+                "AccountingStoragePort": slurmdbd_info["active_slurmdbd_port"],
+                "AccountingStoragePass": f"{self._slurm_manager.munge_socket}",
+            }
+        return slurmdbd_parameters
+
+    def _get_parameters(self) -> dict:
+        """Return the slurm.conf parameters provided by this charm."""
+        slurm_manager = self._slurm_manager
+        mandatory_slurmctld_parameters = ["enable_configless"]
+
+        default_health_check_interval = "600"
+        default_health_check_state = "ANY,CYCLE"
+        health_check_program = "/usr/sbin/omni-nhc-wrapper"
+
+        charm_maintained_parameters = slurm_manager.get_charm_maintained_slurm_config_parameters()
+
+        user_supplied_parameters = self._get_user_supplied_parameters()
+
+        # Preprocess merging slurmctld_parameters if they exist in the context
+        slurmctld_parameters = mandatory_slurmctld_parameters
+        if user_supplied_slurmctld_parameters := user_supplied_parameters.get(
+            "SlurmctldParameters"
+        ):
+            slurmctld_parameters = list(
+                set(slurmctld_parameters + user_supplied_slurmctld_parameters.split(","))
+            )
+            user_supplied_parameters.pop("SlurmctldParameters")
+
+        slurmctld_info = self._slurmctld_peer.get_slurmctld_info()
+
+        parameters = {
+            "ClusterName": self.cluster_name,
+            "ControlAddr": slurmctld_info["ControlAddr"],
+            "ControlMachine": slurmctld_info["ControlMachine"],
+            "HealthCheckInterval": self.config.get("health-check-interval")
+            or default_health_check_interval,
+            "HealthCheckNodeState": self.config.get("health-check-state")
+            or default_health_check_state,
+            "HealthCheckProgram": health_check_program,
+            "SlurmctldParameters": slurmctld_parameters,
+            "ProctrackType": self.config.get("proctrack-type"),
+            # Deal with addons later
+            "JobAcctGatherFrequency": self._get_addons_info()["JobAcctGatherFrequency"],
+            "AcctGatherProfileType": self._get_addons_info()["AcctGatherProfileType"],
+            **charm_maintained_parameters,
+            **user_supplied_parameters,
+            **self._get_slurmdbd_parameters(),
+        }
+        logger.debug(f"Parameters: {parameters}")
+
+        return parameters
+
+    def _assemble_slurm_config(self) -> dict:
+        """Assemble and return the slurm config."""
+        # If we don't have slurmdbd relation then there isn't much we can do so bail out.
+        if not self._get_slurmdbd_parameters():
+            return {}
+
+        down_nodes, nodes, partitions = self._slurmd.get_down_nodes_and_nodes_and_partitions()
+
+        slurm_conf = {
+            **self._parameters,
+            "down_nodes": down_nodes,
+            "partitions": partitions,
+            "nodes": nodes,
+        }
+
+        logger.debug(f"slurm.conf: {slurm_conf}")
+        return slurm_conf
+
+    def set_slurmd_available(self, flag: bool) -> None:
+        """Set stored value of slurmd available."""
+        self._stored.slurmd_available = flag
+
+    def _set_slurmdbd_available(self, flag: bool) -> None:
+        """Set stored value of slurmdbd available."""
+        self._stored.slurmdbd_available = flag
+
+    def set_slurmrestd_available(self, flag: bool) -> None:
+        """Set stored value of slurmdrest available."""
+        self._stored.slurmrestd_available = flag
+
+    def _is_leader(self) -> bool:
+        return self.model.unit.is_leader()
+
+    def is_slurm_installed(self) -> bool:
+        """Return true/false based on whether or not slurm is installed."""
+        return self._stored.slurm_installed
 
     def _check_status(self):  # noqa C901
         """Check for all relations and set appropriate status.
@@ -336,242 +548,19 @@ class SlurmctldCharm(CharmBase):
         self.unit.status = ActiveStatus("slurmctld available")
         return True
 
-    def get_munge_key(self):
+    def get_munge_key(self) -> str:
         """Get the stored munge key."""
         return self._stored.munge_key
 
-    def get_jwt_rsa(self):
+    def get_jwt_rsa(self) -> str:
         """Get the stored jwt_rsa key."""
         return self._stored.jwt_rsa
 
-    def _assemble_partitions(self, slurmd_info):
-        """Make any needed modifications to partition data."""
-        slurmd_info_tmp = copy.deepcopy(slurmd_info)
-        default_partition_from_config = self.config.get("default-partition")
-
-        for partition in slurmd_info:
-            # Deep copy the partition to a tmp var so we can modify it as
-            # needed whilst not modifying the object we are iterating over.
-            partition_tmp = copy.deepcopy(partition)
-            # Extract the partition_name from the partition.
-            partition_name = partition["partition_name"]
-
-            # Check that the default_partition isn't defined in the charm
-            # config.
-            # If the user hasn't provided a default partition, then we infer
-            # the partition_default by defaulting to the "configurator"
-            # partition.
-            if default_partition_from_config:
-                if default_partition_from_config == partition_name:
-                    partition_tmp["partition_default"] = "YES"
-
-            slurmd_info_tmp.remove(partition)
-            slurmd_info_tmp.append(partition_tmp)
-
-        return slurmd_info_tmp
-
-    def _assemble_slurm_config(self):
-        """Assemble and return the slurm config."""
-        logger.debug("## Assembling new slurm.conf")
-
-        slurmctld_info = self._slurmctld_info
-        slurmdbd_info = self.slurmdbd_info
-        slurmd_info = self._slurmd_info
-        cluster_info = self._cluster_info
-
-        logger.debug("######## INFO")
-        logger.debug(f"## slurmd: {slurmd_info}")
-        logger.debug(f"## slurmctld_info: {slurmctld_info}")
-        logger.debug(f"## slurmdbd_info: {slurmdbd_info}")
-        logger.debug(f"## cluster_info: {cluster_info}")
-        logger.debug("######## INFO - end")
-
-        if not (slurmctld_info and slurmd_info and slurmdbd_info):
-            return {}
-
-        addons_info = self._addons_info
-        partitions_info = self._assemble_partitions(slurmd_info)
-        down_nodes = self._assemble_down_nodes(slurmd_info)
-
-        logger.debug(f"#### addons: {addons_info}")
-        logger.debug(f"#### partitions_info: {partitions_info}")
-        logger.debug(f"#### Down nodes: {down_nodes}")
-
-        return {
-            "partitions": partitions_info,
-            "down_nodes": down_nodes,
-            **slurmctld_info,
-            **slurmdbd_info,
-            **addons_info,
-            **cluster_info,
-        }
-
-    def _on_slurmrestd_available(self, event):
-        """Set slurm_config on the relation when slurmrestd available."""
-        if not self._check_status():
-            event.defer()
-            return
-
-        slurm_config = self._assemble_slurm_config()
-
-        if not slurm_config:
-            self.unit.status = BlockedStatus("Cannot generate slurm_config - deferring event.")
-            event.defer()
-            return
-
-    def _on_slurmdbd_available(self, event):
-        self._set_slurmdbd_available(True)
-        self._on_write_slurm_config(event)
-
-    def _on_slurmdbd_unavailable(self, event):
-        self._set_slurmdbd_available(False)
-        self._check_status()
-
-    def _on_write_slurm_config(self, event):
-        """Check that we have what we need before we proceed."""
-        logger.debug("### Slurmctld - _on_write_slurm_config()")
-
-        # only the leader should write the config, restart, and scontrol reconf
-        if not self._is_leader():
-            return
-
-        if not self._check_status():
-            event.defer()
-            return
-
-        slurm_config = self._assemble_slurm_config()
-        if slurm_config:
-            self._slurm_manager.render_slurm_configs(slurm_config)
-
-            # restart is needed if nodes are added/removed from the cluster
-            self._slurm_manager.restart_slurmctld()
-            self._slurm_manager.slurm_cmd("scontrol", "reconfigure")
-
-            # send the custom NHC parameters to all slurmd
-            self._slurmd.set_nhc_params(self.config.get("health-check-params"))
-
-            # check for "not new anymore" nodes, i.e., nodes that run the
-            # node-configured action. Those nodes are not anymore in the
-            # DownNodes section in the slurm.conf, but we need to resume them
-            # manually and update the internal cache
-            down_nodes = slurm_config["down_nodes"]
-            configured_nodes = self._assemble_configured_nodes(down_nodes)
-            logger.debug(f"### configured nodes: {configured_nodes}")
-            self._resume_nodes(configured_nodes)
-            self._stored.down_nodes = down_nodes.copy()
-
-            # slurmrestd needs the slurm.conf file, so send it every time it changes
-            if self._stored.slurmrestd_available:
-                self._slurmrestd.set_slurm_config_on_app_relation_data(slurm_config)
-                # NOTE: scontrol reconfigure does not restart slurmrestd
-                self._slurmrestd.restart_slurmrestd()
-        else:
-            logger.debug("## Should rewrite slurm.conf, but we don't have it. " "Deferring.")
-            event.defer()
-
-    @staticmethod
-    def _assemble_all_nodes(slurmd_info: list) -> List[str]:
-        """Parse slurmd_info and return a list with all hostnames."""
-        nodes = []
-        for partition in slurmd_info:
-            for node in partition["inventory"]:
-                nodes.append(node["node_name"])
-        return nodes
-
-    @staticmethod
-    def _assemble_down_nodes(slurmd_info):
-        """Parse partitions' nodes and assemble a list of DownNodes."""
-        down_nodes = []
-        for partition in slurmd_info:
-            for node in partition["inventory"]:
-                if node["new_node"]:
-                    down_nodes.append(node["node_name"])
-
-        return down_nodes
-
-    def _assemble_configured_nodes(self, down_nodes):
-        """Assemble list of nodes that are not new anymore.
-
-        new_node status is removed with an action, this method returns a list
-        of nodes that were previously new but are not anymore.
-        """
-        configured_nodes = []
-        for node in self._stored.down_nodes:
-            if node not in down_nodes:
-                configured_nodes.append(node)
-
-        return configured_nodes
-
-    def _resume_nodes(self, nodelist):
+    def _resume_nodes(self, nodelist) -> None:
         """Run scontrol to resume the specified node list."""
         nodes = ",".join(nodelist)
         update_cmd = f"update nodename={nodes} state=resume"
         self._slurm_manager.slurm_cmd("scontrol", update_cmd)
-
-    def _on_grafana_available(self, event):
-        """Create the grafana-source if we are the leader and have influxdb."""
-        if not self._is_leader():
-            return
-
-        influxdb_info = self._get_influxdb_info()
-
-        if influxdb_info:
-            self._grafana.set_grafana_source_info(influxdb_info)
-        else:
-            logger.error("## Can not set Grafana source: missing influxdb relation")
-
-    def _on_influxdb_available(self, event):
-        """Assemble addons to forward slurm data to influxdb."""
-        self._on_write_slurm_config(event)
-
-    def _on_elasticsearch_available(self, event):
-        """Assemble addons to forward Slurm data to elasticsearch."""
-        self._on_write_slurm_config(event)
-
-    def _get_influxdb_info(self) -> dict:
-        """Return influxdb info."""
-        return self._influxdb.get_influxdb_info()
-
-    def _drain_nodes_action(self, event):
-        """Drain specified nodes."""
-        nodes = event.params["nodename"]
-        reason = event.params["reason"]
-
-        logger.debug(f"#### Draining {nodes} because {reason}.")
-        event.log(f"Draining {nodes} because {reason}.")
-
-        try:
-            cmd = f'scontrol update nodename={nodes} state=drain reason="{reason}"'
-            subprocess.check_output(shlex.split(cmd))
-            event.set_results({"status": "draining", "nodes": nodes})
-        except subprocess.CalledProcessError as e:
-            event.fail(message=f"Error draining {nodes}: {e.output}")
-
-    def _resume_nodes_action(self, event):
-        """Resume specified nodes."""
-        nodes = event.params["nodename"]
-
-        logger.debug(f"#### Resuming {nodes}.")
-        event.log(f"Resuming {nodes}.")
-
-        try:
-            cmd = f"scontrol update nodename={nodes} state=resume"
-            subprocess.check_output(shlex.split(cmd))
-            event.set_results({"status": "resuming", "nodes": nodes})
-        except subprocess.CalledProcessError as e:
-            event.fail(message=f"Error resuming {nodes}: {e.output}")
-
-    def _infludb_info_action(self, event):
-        influxdb_info = self._get_influxdb_info()
-
-        if not influxdb_info:
-            info = "not related"
-        else:
-            # Juju does not like underscores in dictionaries
-            info = {k.replace("_", "-"): v for k, v in influxdb_info.items()}
-
-        logger.debug(f"## InfluxDB-info action: {influxdb_info}")
-        event.set_results({"influxdb": info})
 
 
 if __name__ == "__main__":

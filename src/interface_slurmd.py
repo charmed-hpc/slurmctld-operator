@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Interface slurmd."""
-import copy
 import json
 import logging
+from typing import List
 
 from ops.framework import EventBase, EventSource, Object, ObjectEvents, StoredState
+from ops.model import Relation
 
 logger = logging.getLogger()
 
@@ -58,6 +59,20 @@ class Slurmd(Object):
             self._on_relation_broken,
         )
 
+    @property
+    def _relations(self) -> List[Relation]:
+        return self.framework.model.relations.get(self._relation_name)
+
+    @property
+    def _num_relations(self):
+        """Return the number of relations (number of slurmd applications)."""
+        return len(self._relations)
+
+    @property
+    def is_joined(self):
+        """Return True if self._relation is not None."""
+        return True if self._relations else False
+
     def _on_relation_created(self, event):
         """Set our data on the relation."""
         # Check that slurm has been installed so that we know the munge key is
@@ -80,11 +95,12 @@ class Slurmd(Object):
 
     def _on_relation_changed(self, event):
         """Emit slurmd available event."""
-        if event.relation.data[event.app].get("partition_info"):
-            self._charm.set_slurmd_available(True)
-            self.on.slurmd_available.emit()
-        else:
-            event.defer()
+        if app_data := event.relation.data.get(event.app):
+            if app_data.get("partition_info"):
+                self._charm.set_slurmd_available(True)
+                self.on.slurmd_available.emit()
+            else:
+                event.defer()
 
     def _on_relation_departed(self, event):
         """Handle hook when 1 unit departs."""
@@ -104,51 +120,6 @@ class Slurmd(Object):
             self._charm.set_slurmd_available(False)
             self.on.slurmd_unavailable.emit()
 
-    @property
-    def _num_relations(self):
-        """Return the number of relations (number of slurmd applications)."""
-        return len(self._charm.framework.model.relations[self._relation_name])
-
-    @property
-    def is_joined(self):
-        """Return True if self._relation is not None."""
-        if self._charm.framework.model.relations.get(self._relation_name):
-            return True
-        else:
-            return False
-
-    def get_slurmd_info(self) -> list:
-        """Return the node info for units of applications on the relation."""
-        partitions = []
-        relations = self.framework.model.relations["slurmd"]
-
-        for relation in relations:
-            inventory = []
-
-            app = relation.app
-            units = relation.units
-            # check if this partition has at least one node before adding it to
-            # the list
-            if units:
-                if not relation.data.get(app):
-                    logger.debug(f"## Not app data in relation with {app}")
-                    return []
-                if not relation.data[app].get("partition_info"):
-                    logger.debug("## Not partition info data in relation")
-                    return []
-
-                partition_info = json.loads(relation.data[app].get("partition_info"))
-
-                for unit in units:
-                    inv = relation.data[unit].get("inventory")
-                    if inv:
-                        inventory.append(json.loads(inv))
-
-                partition_info["inventory"] = inventory.copy()
-                partitions.append(partition_info)
-
-        return ensure_unique_partitions(partitions)
-
     def set_nhc_params(self, params: str = ""):
         """Send NHC parameters to all slurmd."""
         # juju does not allow setting empty data/strings on the relation data,
@@ -159,42 +130,80 @@ class Slurmd(Object):
         logger.debug(f"## set_nhc_params: {params}")
 
         if self.is_joined:
-            relations = self._charm.framework.model.relations.get(self._relation_name)
-            for relation in relations:
+            for relation in self._relations:
                 app = self.model.app
                 relation.data[app]["nhc_params"] = params
         else:
             logger.debug("## slurmd not joined")
 
+    def get_down_nodes_and_nodes_and_partitions(self):
+        """Return the down_nodes, nodes and partitions configuration.
 
-def ensure_unique_partitions(partitions):
-    """Return a list of unique partitions."""
-    # Ensure we have partitions with unique inventory only
-    #
-    # 1) Create a temp copy of the partitions list and iterate
-    # over it.
-    #
-    # 2) On each pass create a temp copy of the partition itself.
-    #
-    # 3) Get the inventory from the temp partition and iterate over it to
-    # ensure we have unique entries.
-    #
-    # 4) Add the unique inventory back to the temp partition and
-    # subsequently add the temp partition back to the original partitions
-    # list.
-    #
-    # 5) Return the list of partitions with unique inventory.
+        Iterate over the relation data to assemble the nodes, down_nodes
+        and partition configuration.
+        """
+        partitions = {}
+        nodes = {}
+        down_nodes = []
 
-    partitions_tmp = copy.deepcopy(partitions)
-    for partition in partitions_tmp:
-        partition_tmp = copy.deepcopy(partition)
-        partitions.remove(partition)
+        for relation in self._relations:
 
-        inventory = partition_tmp["inventory"]
+            app = relation.app
+            units = relation.units
 
-        unique_inventory = list({node["node_name"]: node for node in inventory}.values())
+            if app_data := relation.data.get(app):
+                if partition := app_data.get("partition_config"):
 
-        partition_tmp["inventory"] = unique_inventory
-        partitions.append(partition_tmp)
+                    logger.debug("JSON_PARTITION_FROM_APP_DATA")
+                    logger.debug(partition)
+                    # Load the partition
+                    partition_as_dict = json.loads(partition)
+                    logger.debug("LOADED_DICT_FROM_JSON_APP_DATA")
+                    logger.debug(partition_as_dict)
+                    partition_app_config = partition_as_dict.get(app.name)
+                    logger.debug("PARTITION_APP_CONFIG")
+                    logger.debug(partition_app_config)
+                    partition_nodes = []
 
-    return partitions
+                    for unit in units:
+                        if node := relation.data[unit].get("node"):
+
+                            # Load the node
+                            node = json.loads(node)
+                            logger.debug(f"NODE: {node}")
+
+                            if node_config := node.get("node_config"):
+
+                                # Get the NodeName and append to the partition nodes
+                                node_name = node_config["NodeName"]
+                                partition_nodes.append(node_name)
+
+                                # Add this node config to the nodes dict.
+                                nodes[node_name] = {
+                                    k: v for k, v in node_config.items() if k not in ["NodeName"]
+                                }
+
+                                # Account for new node.
+                                if node.get("new_node"):
+                                    down_nodes.append(node_name)
+
+                    logger.debug(partition)
+                    # Ensure we have a unique list and add it to the partition.
+                    partition_app_config["Nodes"] = list(set(partition_nodes))
+
+                    # Check for default partition.
+                    if self._charm.model.config.get("default-partition") == app.name:
+                        partition_app_config["Default"] = "YES"
+
+                    partitions[app.name] = partition_app_config
+
+        logger.debug("PartitionssssssSSSS")
+        logger.debug(partitions)
+
+        # If we have down nodes because they are new nodes, then set them here.
+        down_nodes_new = (
+            [{"DownNodes": list(set(down_nodes)), "State": "DOWN", "Reason": "New node."}]
+            if len(down_nodes) > 0
+            else []
+        )
+        return down_nodes_new, nodes, partitions

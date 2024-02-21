@@ -107,7 +107,7 @@ config:
       description: >
         Default Slurm partition. This is only used if defined, and must match an
         existing partition.
-    custom-config:
+    slurm-conf-parameters:
       type: string
       default: ""
       description: >
@@ -124,13 +124,13 @@ config:
       description: >
         Identifies the plugin to be used for process tracking on a job step
         basis.
-    cgroup-config:
+    cgroup-parameters:
       type: string
       default: |
         CgroupAutomount=yes
         ConstrainCores=yes
       description: >
-        Configuration content for `cgroup.conf`.
+        User supplied configuration for `cgroup.conf`.
   
     health-check-params:
       default: ""
@@ -218,3 +218,6 @@ actions:
   
       This action returns the host, port, username, password, database, and
       retention policy regarding to InfluxDB.
+
+  config-debug:
+    description: Return partition, nodes, down_nodes for debugging

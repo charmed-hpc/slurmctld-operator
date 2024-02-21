@@ -1,61 +1,45 @@
-ClusterName={{ cluster_name }}
+ClusterName={{ ClusterName }}
 
 # active controller
-ControlMachine={{ active_controller_hostname }}
-ControlAddr={{ active_controller_ingress_address }}
-
-{% if backup_controller_hostname %}
-# backup controller
-BackupController={{ backup_controller_hostname }}
-BackupAddr={{ backup_controller_ingress_address }}
-{% elif backup_controller_ingress_address %}
-BackupController={{ backup_controller_ingress_address }}
-BackupAddr={{ backup_controller_ingress_address }}
-{% endif %}
+ControlMachine={{ ControlMachine }}
+ControlAddr={{ ControlAddr }}
 
 
-SlurmctldParameters={{ slurmctld_parameters }}
+SlurmctldParameters={{ SlurmctldParameters }}
 
 AuthType=auth/munge
-AuthInfo="socket={{ munge_socket }}"
+AuthInfo={{AuthInfo}}
 AuthAltTypes=auth/jwt
-AuthAltParameters="jwt_key={{ jwt_rsa_key_file }}"
+AuthAltParameters={{AuthAltParameters}}
 
 
 CryptoType=crypto/munge
 
-MailProg={{ mail_prog }}
+MailProg={{ MailProg }}
 
-SlurmUser={{ slurm_user }}
-SlurmdUser={{ slurmd_user }}
+SlurmUser={{ SlurmUser }}
+SlurmdUser={{ SlurmdUser }}
 
 SlurmctldPort=6817
 SlurmdPort=6818
 
-SlurmctldPidFile={{ slurmctld_pid_file }}
-SlurmdPidFile={{ slurmd_pid_file }}
+SlurmctldPidFile={{ SlurmctldPidFile }}
+SlurmdPidFile={{ SlurmdPidFile }}
 
-SlurmctldLogFile={{ slurmctld_log_file }}
-SlurmdLogFile={{ slurmd_log_file }}
+SlurmctldLogFile={{ SlurmctldLogFile }}
+SlurmdLogFile={{ SlurmdLogFile }}
 
-SlurmdSpoolDir={{ slurm_spool_dir }}
-StateSaveLocation={{ slurm_state_dir }}
+SlurmdSpoolDir={{ SlurmdSpoolDir }}
+StateSaveLocation={{ StateSaveLocation }}
 
-PluginDir={{ slurm_plugin_dir }}
+PluginDir={{ PluginDir }}
+PlugStackConfig={{ PlugStackConfig }}
 
-PlugStackConfig={{ slurm_plugstack_conf }}
+ProctrackType={{ ProctrackType }}
 
-ProctrackType={{ proctrack_type }}
-
-#SlurmdDebug={{ log_level }}
-#SlurmctldDebug={{ log_level }}
-
-{% if acct_gather_profile %}
-AcctGatherProfileType={{ acct_gather_profile }}
-{% else %}
-AcctGatherProfileType=acct_gather_profile/none
-{% endif %}
-JobAcctGatherFrequency={{ acct_gather_frequency }}
+AcctGatherProfileType={{ AcctGatherProfileType }}
+JobAcctGatherFrequency={{ JobAcctGatherFrequency }}
+JobAcctGatherType=jobacct_gather/linux
 
 RebootProgram="/usr/sbin/reboot --reboot"
 
@@ -69,30 +53,15 @@ JobCompLoc={{elasticsearch_address}}
 JobCompParams=timeout=5
 {% endif %}
 
-{% if prolog_epilog %}
-{% if prolog_epilog.slurmctld_epilog_path %}
-EpilogSlurmctld={{prolog_epilog.slurmctld_epilog_path}}
-{% endif %}
-{% if prolog_epilog.slurmctld_prolog_path %}
-PrologSlurmctld={{prolog_epilog.slurmctld_prolog_path}}
-{% endif %}
-{% endif %}
+HealthCheckProgram={{HealthCheckProgram}}
+HealthCheckInterval={{HealthCheckInterval}}
+HealthCheckNodeState={{HealthCheckNodeState}}
 
-{% if nhc %}
-HealthCheckProgram={{nhc.nhc_bin}}
-HealthCheckInterval={{nhc.health_check_interval}}
-HealthCheckNodeState={{nhc.health_check_node_state}}
-{% endif %}
-
-# SLURMDBD CONFIGURED ON {{ slurmdbd_hostname }}
-AccountingStorageType=accounting_storage/slurmdbd
-JobAcctGatherType=jobacct_gather/linux
-AccountingStorageHost={{ active_slurmdbd_hostname }}
-AccountingStoragePort={{ active_slurmdbd_port }}
-AccountingStoragePass={{ munge_socket }}
-{% if backup_slurmdbd_hostname %}
-AccountingStorageBackupHost={{ backup_slurmdbd_hostname }}
-{% endif %}
+# SLURMDBD CONFIGURATION {{ AccountingStorageHost }}
+AccountingStorageType={{ AccountingStorageType }}
+AccountingStorageHost={{ AccountingStorageHost }}
+AccountingStoragePort={{ AccountingStoragePort }}
+AccountingStoragePass={{ AccountingStoragePass }}
 
 # INCLUDE CLUSTER SPECIFIC CONFIGURATION OVERRIDE
 #include /etc/slurm/slurm-%c.conf
@@ -101,15 +70,16 @@ AccountingStorageBackupHost={{ backup_slurmdbd_hostname }}
 GresTypes=gpu
 
 # Enumerate nodes and partitions
-{% for partition in partitions %}
-{% for node in partition.inventory %}
-NodeName={{node.node_name}} NodeAddr={{node.node_addr}} State={{node.state}} RealMemory={{node.real_memory}} CPUs={{node.cpus}} ThreadsPerCore={{node.threads_per_core}} CoresPerSocket={{node.cores_per_socket}} SocketsPerBoard={{node.sockets_per_board}} {{ "Gres=%s" % node.gres if node.gres else ""}}
-{%- endfor %}
+{% for partition_name, partition in partitions.items() %}
+PartitionName={{partition_name}} Nodes={% for node_name in partition.Nodes %}{{node_name}}{{ "," if not loop.last}}{% endfor %} {% for k,v in partition.items() %}{% if k != 'Nodes' %}{{k}}={{v}} {% endif %}{% endfor %}
+{% endfor %}
 
-PartitionName={{partition.partition_name}} Nodes={% for slurmd in partition.inventory %}{{slurmd.node_name}}{{ "," if not loop.last}}{% endfor %} Default={{ 'YES' if partition.partition_default else 'NO' }} State={{partition.partition_state}} {{partition.partition_config if partition.partition_config else ""}}
+
+{% for node_name, node in nodes.items() %}
+NodeName={{node_name}} {% for k,v in node.items() %}{{k}}={{v}} {% endfor %}
 {% endfor %}
 
 # Enumerate nodes in DownNodes
-{% for node in down_nodes %}
-DownNodes={{node}} Reason="New node"
+{% for entry in down_nodes %}
+DownNodes={% for node_name in entry.DownNodes %}{{node_name}}{{ "," if not loop.last}}{% endfor %} State={{entry.State}} Reason="{{entry.Reason}}"
 {% endfor %}

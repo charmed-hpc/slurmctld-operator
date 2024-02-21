@@ -129,8 +129,8 @@ class SlurmctldPeer(Object):
             # NOTE: We only care about the active and backup controllers.
             # Set the active controller info and check for and set the
             # backup controller information if one exists.
-            ctxt["active_controller_ingress_address"] = unit_relation_data["ingress-address"]
-            ctxt["active_controller_hostname"] = self._charm.hostname
+            ctxt["ControlAddr"] = unit_relation_data["ingress-address"]
+            ctxt["ControlMachine"] = self._charm.hostname
             ctxt["active_controller_port"] = str(self._charm.port)
 
             # If we have > 0 controllers (also have a backup), iterate over

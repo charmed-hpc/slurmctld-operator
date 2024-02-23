@@ -463,7 +463,7 @@ class SlurmctldCharm(CharmBase):
         down_nodes, nodes, partitions = self._slurmd.get_down_nodes_and_nodes_and_partitions()
 
         slurm_conf = {
-            **self._parameters,
+            **self._get_parameters(),
             "down_nodes": down_nodes,
             "partitions": partitions,
             "nodes": nodes,

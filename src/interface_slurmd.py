@@ -47,6 +47,10 @@ class Slurmd(Object):
             self._on_relation_created,
         )
         self.framework.observe(
+            self._charm.on[self._relation_name].relation_joined,
+            self._on_relation_joined,
+        )
+        self.framework.observe(
             self._charm.on[self._relation_name].relation_changed,
             self._on_relation_changed,
         )
@@ -92,6 +96,17 @@ class Slurmd(Object):
 
         app_relation_data["cluster_name"] = self._charm.config.get("cluster-name")
         app_relation_data["nhc_params"] = self._charm.config.get("health-check-params", "#")
+
+
+    def _on_relation_joined(self, event):
+        """Get the newly joined node_name from the node_config in the relation data."""
+
+        if node := event.relation.data[event.unit].get("node"):
+            node = json.loads(node)
+            if node_config := node.get("node_config"):
+                if node_name := node_config.get("NodeName"):
+                    self._charm._stored.down_nodes.append(node_name)
+                    logger.debug(f"NODE_NAME: {node_name}")
 
     def _on_relation_changed(self, event):
         """Emit slurmd available event."""

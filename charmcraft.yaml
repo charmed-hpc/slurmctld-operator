@@ -221,3 +221,6 @@ actions:
 
   config-debug:
     description: Return partition, nodes, down_nodes for debugging
+
+  get-down-nodes-from-stored-state:
+    description: Return down nodes from stored state.

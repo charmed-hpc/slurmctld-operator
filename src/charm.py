@@ -90,7 +90,6 @@ class SlurmctldCharm(CharmBase):
             self.on.drain_action: self._drain_nodes_action,
             self.on.resume_action: self._resume_nodes_action,
             self.on.influxdb_info_action: self._infludb_info_action,
-            self.on.config_debug_action: self._config_debug_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)

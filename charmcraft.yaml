@@ -59,10 +59,6 @@ bases:
         architectures: [amd64]
 
 parts:
-  charm:
-    build-packages: [git]
-    charm-python-packages: [setuptools]
-
   # Create a version file and pack it into the charm. This is dynamically generated
   # as part of the build process for a charm to ensure that the git revision of the
   # charm is always recorded in this version file.

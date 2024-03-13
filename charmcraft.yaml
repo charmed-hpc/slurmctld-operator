@@ -82,7 +82,7 @@ config:
     custom-slurm-repo:
       type: string
       default: ""
-      description: >
+      description: |
         Use a custom repository for Slurm installation.
   
         This can be set to the Organization's local mirror/cache of packages and
@@ -96,7 +96,7 @@ config:
     cluster-name:
       type: string
       default: osd-cluster
-      description: >
+      description: |
         Name to be recorded in database for jobs from this cluster.
   
         This is important if a single database is used to record information from
@@ -104,13 +104,13 @@ config:
     default-partition:
       type: string
       default: ""
-      description: >
+      description: |
         Default Slurm partition. This is only used if defined, and must match an
         existing partition.
     slurm-conf-parameters:
       type: string
       default: ""
-      description: >
+      description: |
         User supplied Slurm configuration.
   
         This value supplements the charm supplied `slurm.conf` that is used for
@@ -121,7 +121,7 @@ config:
     proctrack-type:
       type: string
       default: proctrack/cgroup
-      description: >
+      description: |
         Identifies the plugin to be used for process tracking on a job step
         basis.
     cgroup-parameters:
@@ -129,13 +129,13 @@ config:
       default: |
         CgroupAutomount=yes
         ConstrainCores=yes
-      description: >
+      description: |
         User supplied configuration for `cgroup.conf`.
   
     health-check-params:
       default: ""
       type: string
-      description: >
+      description: |
         Extra parameters for NHC command.
   
         This option can be used to customize how NHC is called, e.g. to send an
@@ -153,7 +153,7 @@ config:
     acct-gather-frequency:
       type: string
       default: "task=30"
-      description: >
+      description: |
         Accounting and profiling sampling intervals for the acct_gather plugins.
   
         Note: A value of `0` disables the periodic sampling. In this case, the
@@ -164,7 +164,7 @@ config:
     acct-gather-custom:
       type: string
       default: ""
-      description: >
+      description: |
         User supplied `acct_gather.conf` configuration.
   
         This value supplements the charm supplied `acct_gather.conf` file that is
@@ -172,16 +172,18 @@ config:
 
 actions:
   show-current-config:
-    description: >
+    description: |
       Display the currently used `slurm.conf`.
   
-      Note: This file only exists in `slurmctld` charm and is automatically
-      distributed to all compute nodes by Slurm.
-  
       Example usage:
-      $ juju run-action slurmctld/leader --format=json --wait | jq .[].results.slurm.conf | xargs -I % -0 python3 -c 'print(%)'
+
+      ```bash
+      juju run slurmctld/leader show-current-config \
+          --quiet --format=json  | jq .[].results.slurm.conf | xargs -I % -0 python3 -c 'print(%)'
+      ```
+
   drain:
-    description: >
+    description: |
       Drain specified nodes.
   
       Example usage:
@@ -197,7 +199,7 @@ actions:
       - nodename
       - reason
   resume:
-    description: >
+    description: |
       Resume specified nodes.
   
       Note: Newly added nodes will remain in the `down` state until configured,
@@ -207,20 +209,14 @@ actions:
     params:
       nodename:
         type: string
-        description: >
+        description: |
           The nodes to resume, using the Slurm format, e.g. `node-[1,2]`.
     required:
       - nodename
   
   influxdb-info:
-    description: >
+    description: |
       Get InfluxDB info.
   
       This action returns the host, port, username, password, database, and
       retention policy regarding to InfluxDB.
-
-  config-debug:
-    description: Return partition, nodes, down_nodes for debugging
-
-  get-down-nodes-from-stored-state:
-    description: Return down nodes from stored state.

@@ -34,7 +34,6 @@ class Slurmd(Object):
     """Slurmd inventory interface."""
 
     on = SlurmdInventoryEvents()
-    _state = StoredState()
 
     def __init__(self, charm, relation_name):
         """Set self._relation_name and self.charm."""
@@ -45,10 +44,6 @@ class Slurmd(Object):
         self.framework.observe(
             self._charm.on[self._relation_name].relation_created,
             self._on_relation_created,
-        )
-        self.framework.observe(
-            self._charm.on[self._relation_name].relation_joined,
-            self._on_relation_joined,
         )
         self.framework.observe(
             self._charm.on[self._relation_name].relation_changed,
@@ -97,25 +92,30 @@ class Slurmd(Object):
         app_relation_data["cluster_name"] = self._charm.config.get("cluster-name")
         app_relation_data["nhc_params"] = self._charm.config.get("health-check-params", "#")
 
-
-    def _on_relation_joined(self, event):
-        """Get the newly joined node_name from the node_config in the relation data."""
-
-        if node := event.relation.data[event.unit].get("node"):
-            node = json.loads(node)
-            if node_config := node.get("node_config"):
-                if node_name := node_config.get("NodeName"):
-                    self._charm._stored.down_nodes.append(node_name)
-                    logger.debug(f"NODE_NAME: {node_name}")
-
     def _on_relation_changed(self, event):
-        """Emit slurmd available event."""
+        """Emit slurmd available event and update new_nodes."""
         if app_data := event.relation.data.get(event.app):
             if app_data.get("partition_info"):
                 self._charm.set_slurmd_available(True)
                 self.on.slurmd_available.emit()
             else:
                 event.defer()
+                return
+
+        # The event.unit data isn't in the relation data on the first occurrence
+        # of relation-changed so we check for it here in order to prevent things
+        # from blowing up. Not much to do if we don't have it other than log
+        # and proceed.
+        if unit_data := event.relation.data.get(event.unit):
+            if node := unit_data.get("node"):
+                node = json.loads(node)
+                if node.get("new_node") == True:
+                    self._charm.new_nodes.append(node.get("node_config").get("NodeName"))
+            else:
+                logger.debug(f"`node` data does not exist for unit: {event.unit}.")
+                return
+        else:
+            logger.debug(f"No relation data for unit: {event.unit}.")
 
     def _on_relation_departed(self, event):
         """Handle hook when 1 unit departs."""
@@ -151,15 +151,15 @@ class Slurmd(Object):
         else:
             logger.debug("## slurmd not joined")
 
-    def get_down_nodes_and_nodes_and_partitions(self):
-        """Return the down_nodes, nodes and partitions configuration.
+    def get_new_nodes_and_nodes_and_partitions(self):
+        """Return the new_nodes, nodes and partitions configuration.
 
-        Iterate over the relation data to assemble the nodes, down_nodes
+        Iterate over the relation data to assemble the nodes, new_nodes
         and partition configuration.
         """
         partitions = {}
         nodes = {}
-        down_nodes = []
+        new_nodes = []
 
         for relation in self._relations:
 
@@ -168,25 +168,14 @@ class Slurmd(Object):
 
             if app_data := relation.data.get(app):
                 if partition := app_data.get("partition_config"):
-
-                    logger.debug("JSON_PARTITION_FROM_APP_DATA")
-                    logger.debug(partition)
-                    # Load the partition
                     partition_as_dict = json.loads(partition)
-                    logger.debug("LOADED_DICT_FROM_JSON_APP_DATA")
-                    logger.debug(partition_as_dict)
                     partition_app_config = partition_as_dict.get(app.name)
-                    logger.debug("PARTITION_APP_CONFIG")
-                    logger.debug(partition_app_config)
                     partition_nodes = []
 
                     for unit in units:
                         if node := relation.data[unit].get("node"):
-
                             # Load the node
                             node = json.loads(node)
-                            logger.debug(f"NODE: {node}")
-
                             if node_config := node.get("node_config"):
 
                                 # Get the NodeName and append to the partition nodes
@@ -200,9 +189,8 @@ class Slurmd(Object):
 
                                 # Account for new node.
                                 if node.get("new_node"):
-                                    down_nodes.append(node_name)
+                                    new_nodes.append(node_name)
 
-                    logger.debug(partition)
                     # Ensure we have a unique list and add it to the partition.
                     partition_app_config["Nodes"] = list(set(partition_nodes))
 
@@ -212,13 +200,10 @@ class Slurmd(Object):
 
                     partitions[app.name] = partition_app_config
 
-        logger.debug("PartitionssssssSSSS")
-        logger.debug(partitions)
-
         # If we have down nodes because they are new nodes, then set them here.
-        down_nodes_new = (
-            [{"DownNodes": list(set(down_nodes)), "State": "DOWN", "Reason": "New node."}]
-            if len(down_nodes) > 0
+        new_node_down_nodes = (
+            [{"DownNodes": list(set(new_nodes)), "State": "DOWN", "Reason": "New node."}]
+            if len(new_nodes) > 0
             else []
         )
-        return down_nodes_new, nodes, partitions
+        return new_node_down_nodes, nodes, partitions

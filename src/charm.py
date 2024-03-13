@@ -44,7 +44,7 @@ class SlurmctldCharm(CharmBase):
             slurmd_available=False,
             slurmrestd_available=False,
             slurmdbd_available=False,
-            down_nodes=[],
+            new_nodes=[],
         )
 
         self._slurm_manager = SlurmctldManager(self, "slurmctld")
@@ -91,10 +91,19 @@ class SlurmctldCharm(CharmBase):
             self.on.resume_action: self._resume_nodes_action,
             self.on.influxdb_info_action: self._infludb_info_action,
             self.on.config_debug_action: self._config_debug_action,
-            self.on.get_down_nodes_from_stored_state_action: self._get_down_nodes_from_stored_state_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
+
+    @property
+    def new_nodes(self) -> List[str]:
+        """Return new_nodes from StoredState."""
+        return self._stored.new_nodes
+
+    @new_nodes.setter
+    def new_nodes(self, new_nodes: List[str]) -> None:
+        """Set the new nodes."""
+        self._stored.new_nodes = new_nodes
 
     def _on_install(self, event) -> None:
         """Perform installation operations for slurmctld."""
@@ -197,12 +206,6 @@ class SlurmctldCharm(CharmBase):
         """Return influxdb info."""
         return self._influxdb.get_influxdb_info()
 
-
-    def _get_down_nodes_from_stored_state_action(self, event) -> None:
-        """Get down_nodes from_stored_state."""
-        logger.debug(f"#### DOWN_NODES_FROM_STORED_STATE: {list(self._stored.down_nodes)}")
-
-
     def _drain_nodes_action(self, event) -> None:
         """Drain specified nodes."""
         nodes = event.params["nodename"]
@@ -246,10 +249,10 @@ class SlurmctldCharm(CharmBase):
 
     def _config_debug_action(self, event) -> None:
         """Debug slurmd relation data."""
-        down_nodes, nodes, partitions = self._slurmd.get_down_nodes_and_nodes_and_partitions()
+        new_nodes, nodes, partitions = self._slurmd.get_new_nodes_and_nodes_and_partitions()
 
         logger.debug("######## SLURMD Relation Data")
-        logger.debug(f"## DownNodes: {down_nodes}")
+        logger.debug(f"## NewNodes: {new_nodes}")
         logger.debug(f"## Nodes: {nodes}")
         logger.debug(f"## Partitions: {partitions}")
 
@@ -272,35 +275,38 @@ class SlurmctldCharm(CharmBase):
             if user_supplied_cgroup_parameters := self.config.get("cgroup-parameters"):
                 self._slurm_manager.write_cgroup_conf(user_supplied_cgroup_parameters)
 
-            # Restart is needed if nodes are added/removed from the cluster.
+            # Restart is needed if nodes are added/removed from the cluster, but since we don't
+            # currently have a method of identifying if nodes are being added or removed, simply
+            # restart every time after writing slurm.conf.
             self._slurm_manager.restart_slurmctld()
             self._slurm_manager.slurm_cmd("scontrol", "reconfigure")
 
-            # send the custom NHC parameters to all slurmd
+            # Send the custom NHC parameters to all slurmd.
+            #
+            # Todo (jamesbeedy): We can clean this up by only sending the health-check-params
+            #                    to slurmd using config-changed event hook.
             self._slurmd.set_nhc_params(self.config.get("health-check-params"))
 
-            # check for "not new anymore" nodes, i.e., nodes that run the
-            # node-configured action. Those nodes are not anymore in the
-            # DownNodes section in the slurm.conf, but we need to resume them
-            # manually and update the internal cache
-            down_nodes_from_stored_state = self._stored.down_nodes
-            logger.debug(f"### DOWN_NODES_FROM_STORED_STATE: {down_nodes_from_stored_state}")
+            # Transitioning Nodes
+            #
+            # 1) Identify transitioning_nodes by comparing the new_nodes in StoredState with the
+            #    new_nodes that come from slurmd relation data.
+            #
+            # 2) If there are transitioning_nodes, resume them, and update the new_nodes in
+            #    StoredState.
+            new_nodes_from_stored_state = self.new_nodes
+            new_nodes_from_slurm_config = self._get_new_node_names_from_slurm_config(slurm_config)
 
-            down_nodes_from_slurm_config = self._get_down_node_names_from_slurm_config(slurm_config)
-            logger.debug(f"### DOWN_NODES_FROM_SLURM_CONFIG: {down_nodes_from_slurm_config}")
-
-            configured_nodes = [
-                node for node in down_nodes_from_stored_state
-                if node not in down_nodes_from_slurm_config
+            transitioning_nodes = [
+                node for node in new_nodes_from_stored_state
+                if node not in new_nodes_from_slurm_config
             ]
 
-            logger.debug(f"### CONFIGURED_NODES: {configured_nodes}")
+            if len(transitioning_nodes) > 0:
+                self._resume_nodes(transitioning_nodes)
+                self.new_nodes = new_nodes_from_slurm_config.copy()
 
-            if len(configured_nodes) > 0:
-                self._resume_nodes(configured_nodes)
-                self._stored.down_nodes = down_nodes_from_slurm_config.copy()
-
-            # slurmrestd needs the slurm.conf file, so send it every time it changes
+            # slurmrestd needs the slurm.conf file, so send it every time it changes.
             if self._stored.slurmrestd_available:
                 self._slurmrestd.set_slurm_config_on_app_relation_data(slurm_config)
                 # NOTE: scontrol reconfigure does not restart slurmrestd
@@ -391,31 +397,16 @@ class SlurmctldCharm(CharmBase):
             addon = {"elasticsearch_address": f"{elasticsearch_ingress}{suffix}"}
         return addon
 
-    def _assemble_configured_nodes(self, down_node_names) -> list:
-        """Assemble list of nodes that are not new anymore.
-
-        new_node status is removed with an action, this method returns a list
-        of nodes that were previously new but are not anymore.
-        """
-        configured_nodes = []
-        for node in self._stored.down_nodes:
-            if node not in down_node_names:
-                configured_nodes.append(node)
-        return configured_nodes
-
-    def _get_down_node_names_from_slurm_config(self, slurm_config: dict) -> list:
-        """Given the slurm_config, return the down_node node names."""
-        down_node_names = []
+    def _get_new_node_names_from_slurm_config(self, slurm_config: dict) -> list:
+        """Given the slurm_config, return the nodes that are DownNodes with reason 'New node.'"""
+        new_node_names = []
         if down_nodes_from_slurm_config := slurm_config.get("down_nodes"):
-            logger.debug(f"DOWN_NODES_FROM_SLURM_CONFIG: {down_nodes_from_slurm_config}")
             for down_nodes_entry in down_nodes_from_slurm_config:
-                logger.debug(f"DOWN_NODES_ENTRY: {down_nodes_entry}")
+                 
                 for down_node_name in down_nodes_entry["DownNodes"]:
-                    logger.debug(f"DOWN_NODE_NAME: {down_node_name}")
-                    down_node_names.append(down_node_name)
-        
-        logger.debug(f"DOWN_NODE_NAMES: {down_node_names}")
-        return down_node_names
+                    if down_nodes_entry["Reason"] == "New node.":
+                        new_node_names.append(down_node_name)
+        return new_node_names
 
     def _get_slurmdbd_parameters(self) -> dict:
         """Return the slurmdbd parameters for the slurm.conf."""
@@ -454,27 +445,35 @@ class SlurmctldCharm(CharmBase):
 
         slurmctld_info = self._slurmctld_peer.get_slurmctld_info()
 
-        parameters = {
+        return {
             "ClusterName": self.cluster_name,
+
             "ControlAddr": slurmctld_info["ControlAddr"],
+
             "ControlMachine": slurmctld_info["ControlMachine"],
+
             "HealthCheckInterval": self.config.get("health-check-interval")
             or default_health_check_interval,
+
             "HealthCheckNodeState": self.config.get("health-check-state")
             or default_health_check_state,
+
             "HealthCheckProgram": health_check_program,
+
             "SlurmctldParameters": ",".join(slurmctld_parameters),
+
             "ProctrackType": self.config.get("proctrack-type"),
+
             # Deal with addons later
             "JobAcctGatherFrequency": self._get_addons_info()["JobAcctGatherFrequency"],
             "AcctGatherProfileType": self._get_addons_info()["AcctGatherProfileType"],
+
             **charm_maintained_parameters,
+
             **user_supplied_parameters,
+
             **self._get_slurmdbd_parameters(),
         }
-        logger.debug(f"Parameters: {parameters}")
-
-        return parameters
 
     def _assemble_slurm_config(self) -> dict:
         """Assemble and return the slurm config."""
@@ -482,11 +481,11 @@ class SlurmctldCharm(CharmBase):
         if not self._get_slurmdbd_parameters():
             return {}
 
-        down_nodes, nodes, partitions = self._slurmd.get_down_nodes_and_nodes_and_partitions()
+        new_nodes, nodes, partitions = self._slurmd.get_new_nodes_and_nodes_and_partitions()
 
         slurm_conf = {
             **self._get_parameters(),
-            "down_nodes": down_nodes,
+            "down_nodes": new_nodes,
             "partitions": partitions,
             "nodes": nodes,
         }
@@ -578,7 +577,7 @@ class SlurmctldCharm(CharmBase):
         """Get the stored jwt_rsa key."""
         return self._stored.jwt_rsa
 
-    def _resume_nodes(self, nodelist: List) -> None:
+    def _resume_nodes(self, nodelist: List[str]) -> None:
         """Run scontrol to resume the specified node list."""
         nodes = ",".join(nodelist)
         update_cmd = f"update nodename={nodes} state=resume"

@@ -8,22 +8,65 @@ import logging
 import shlex
 import subprocess
 
-from typing import List
+from typing import Any, Dict, List, Optional, Union, overload
 
-from charms.fluentbit.v0.fluentbit import FluentbitClient
-from interface_elasticsearch import Elasticsearch
-from interface_grafana_source import GrafanaSource
-from interface_influxdb import InfluxDB
-from interface_prolog_epilog import PrologEpilog
-from interface_slurmctld_peer import SlurmctldPeer
-from interface_slurmd import Slurmd
-from interface_slurmdbd import Slurmdbd
-from interface_slurmrestd import Slurmrestd
+from charms.fluentbit.v0.fluentbit import FluentbitClient # type: ignore
+from interface_elasticsearch import (
+    Elasticsearch,
+    ElasticsearchAvailableEvent,
+    ElasticsearchUnavailableEvent,
+)
+from interface_grafana_source import (
+    GrafanaSource,
+    GrafanaSourceAvailableEvent,
+)
+from interface_influxdb import (
+    InfluxDB,
+    InfluxDBAvailableEvent,
+    InfluxDBUnavailableEvent,
+)
+from interface_prolog_epilog import (
+    PrologEpilog,
+    PrologEpilogAvailableEvent,
+    PrologEpilogUnavailableEvent,
+)
+from interface_slurmctld_peer import (
+    SlurmctldPeer,
+    SlurmctldPeerAvailableEvent,
+)
+from interface_slurmd import (
+    Slurmd,
+    SlurmdAvailableEvent,
+    SlurmdBrokenEvent,
+    SlurmdDepartedEvent,
+)
+from interface_slurmdbd import (
+    Slurmdbd,
+    SlurmdbdAvailableEvent,
+    SlurmdbdUnavailableEvent,
+)
+from interface_slurmrestd import (
+    Slurmrestd,
+    SlurmrestdAvailableEvent,
+    SlurmrestdUnavailableEvent,
+)
+
+from ops import (
+    ActionEvent,
+    ConfigChangedEvent,
+    HookEvent,
+    InstallEvent,
+    RelationCreatedEvent,
+    UpdateStatusEvent,
+    UpgradeCharmEvent,
+)
+
 from ops.charm import CharmBase
-from ops.framework import StoredState
+from ops.framework import StoredState, StoredList
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
-from slurmctld_ops import SlurmctldManager
+from slurmctld_ops import SlurmctldManager, default_parameters
+
 
 logger = logging.getLogger()
 
@@ -61,18 +104,21 @@ class SlurmctldCharm(CharmBase):
         self._fluentbit = FluentbitClient(self, "fluentbit")
 
         event_handler_bindings = {
+            # Charm lifecycle hook events
             self.on.install: self._on_install,
             self.on.upgrade_charm: self._on_upgrade,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_write_slurm_config,
-            # slurm component lifecycle events
+            # slurmdbd lifecycle hook events
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
+            # slurmd lifecycle hook events
             self._slurmd.on.slurmd_available: self._on_write_slurm_config,
             self._slurmd.on.slurmd_unavailable: self._on_write_slurm_config,
             self._slurmd.on.slurmd_departed: self._on_write_slurm_config,
+            # slurmrestd lifecycle hook events
             self._slurmrestd.on.slurmrestd_available: self._on_slurmrestd_available,
-            self._slurmrestd.on.slurmrestd_unavailable: self._on_write_slurm_config,
+            self._slurmrestd.on.slurmrestd_unavailable: self._on_slurmrestd_unavailable,
             # NOTE: a second slurmctld should get the jwt/munge keys and configure them
             self._slurmctld_peer.on.slurmctld_peer_available: self._on_write_slurm_config,
             # fluentbit
@@ -95,16 +141,19 @@ class SlurmctldCharm(CharmBase):
             self.framework.observe(event, handler)
 
     @property
-    def new_nodes(self) -> List[str]:
-        """Return new_nodes from StoredState."""
-        return self._stored.new_nodes
+    def new_nodes(self) -> List[Any]: 
+        """Return new_nodes from StoredState.
+
+        Note: Ignore the attr-defined for now until this is fixed upstream.
+        """
+        return [node for node in self._stored.new_nodes] # type: ignore [attr-defined]
 
     @new_nodes.setter
-    def new_nodes(self, new_nodes: List[str]) -> None:
+    def new_nodes(self, new_nodes: List[Any]) -> None:
         """Set the new nodes."""
         self._stored.new_nodes = new_nodes
 
-    def _on_install(self, event) -> None:
+    def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
         self.unit.status = WaitingStatus("Installing slurmctld")
 
@@ -139,20 +188,20 @@ class SlurmctldCharm(CharmBase):
 
         self._check_status()
 
-    def _on_upgrade(self, event) -> None:
+    def _on_upgrade(self, event: UpgradeCharmEvent) -> None:
         """Perform upgrade operations."""
         self.unit.set_workload_version(self._slurm_manager.version())
 
-    def _on_update_status(self, event) -> None:
+    def _on_update_status(self, event: UpdateStatusEvent) -> None:
         """Handle update status."""
         self._check_status()
 
-    def _on_show_current_config(self, event) -> None:
+    def _on_show_current_config(self, event: ActionEvent) -> None:
         """Show current slurm.conf."""
         slurm_conf = self._slurm_manager.slurm_conf_path.read_text()
         event.set_results({"slurm.conf": slurm_conf})
 
-    def _on_fluentbit_relation_created(self, event) -> None:
+    def _on_fluentbit_relation_created(self, event: RelationCreatedEvent) -> None:
         """Set up Fluentbit log forwarding."""
         logger.debug("## Configuring fluentbit")
         cfg = []
@@ -160,28 +209,28 @@ class SlurmctldCharm(CharmBase):
         cfg.extend(self._slurm_manager.fluentbit_config_slurm)
         self._fluentbit.configure(cfg)
 
-    def _on_slurmrestd_available(self, event) -> None:
-        """Set slurm_config on the relation when slurmrestd available."""
+    def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
+        """Check that we have what we nSet slurm_config on the relation when slurmrestd available."""
         if not self._check_status():
             event.defer()
-            return
 
-        slurm_config = self._assemble_slurm_config()
-
-        if not slurm_config:
+        if not self._assemble_slurm_config():
             self.unit.status = BlockedStatus("Cannot generate slurm_config - deferring event.")
             event.defer()
-            return
 
-    def _on_slurmdbd_available(self, event) -> None:
+    def _on_slurmrestd_unavailable(self, event: SlurmrestdUnavailableEvent) -> None:
+        """Set slurmrestd_available to False."""
+        self.set_slurmrestd_available(False)
+
+    def _on_slurmdbd_available(self, event: SlurmdbdAvailableEvent) -> None:
         self._set_slurmdbd_available(True)
         self._on_write_slurm_config(event)
 
-    def _on_slurmdbd_unavailable(self, event) -> None:
+    def _on_slurmdbd_unavailable(self, event: SlurmdbdUnavailableEvent) -> None:
         self._set_slurmdbd_available(False)
         self._check_status()
 
-    def _on_grafana_available(self, event) -> None:
+    def _on_grafana_available(self, event: GrafanaSourceAvailableEvent) -> None:
         """Create the grafana-source if we are the leader and have influxdb."""
         if not self._is_leader():
             return
@@ -193,19 +242,19 @@ class SlurmctldCharm(CharmBase):
         else:
             logger.error("## Can not set Grafana source: missing influxdb relation")
 
-    def _on_influxdb_available(self, event) -> None:
+    def _on_influxdb_available(self, event: InfluxDBAvailableEvent) -> None:
         """Assemble addons to forward slurm data to influxdb."""
         self._on_write_slurm_config(event)
 
-    def _on_elasticsearch_available(self, event) -> None:
+    def _on_elasticsearch_available(self, event: ElasticsearchAvailableEvent) -> None:
         """Assemble addons to forward Slurm data to elasticsearch."""
         self._on_write_slurm_config(event)
 
-    def _get_influxdb_info(self) -> dict:
+    def _get_influxdb_info(self) -> Dict[Any, Any]:
         """Return influxdb info."""
         return self._influxdb.get_influxdb_info()
 
-    def _drain_nodes_action(self, event) -> None:
+    def _drain_nodes_action(self, event: ActionEvent) -> None:
         """Drain specified nodes."""
         nodes = event.params["nodename"]
         reason = event.params["reason"]
@@ -220,7 +269,7 @@ class SlurmctldCharm(CharmBase):
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error draining {nodes}: {e.output}")
 
-    def _resume_nodes_action(self, event) -> None:
+    def _resume_nodes_action(self, event: ActionEvent) -> None:
         """Resume specified nodes."""
         nodes = event.params["nodename"]
 
@@ -234,28 +283,27 @@ class SlurmctldCharm(CharmBase):
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
-    def _infludb_info_action(self, event) -> None:
+    def _infludb_info_action(self, event: ActionEvent) -> None:
         influxdb_info = self._get_influxdb_info()
 
         if not influxdb_info:
-            info = "not related"
+            info = {"status": "not related"}
         else:
             # Juju does not like underscores in dictionaries
             info = {k.replace("_", "-"): v for k, v in influxdb_info.items()}
 
         logger.debug(f"## InfluxDB-info action: {influxdb_info}")
-        event.set_results({"influxdb": info})
+        event.set_results({"influxdb.info": info})
 
-    def _config_debug_action(self, event) -> None:
-        """Debug slurmd relation data."""
-        new_nodes, nodes, partitions = self._slurmd.get_new_nodes_and_nodes_and_partitions()
-
-        logger.debug("######## SLURMD Relation Data")
-        logger.debug(f"## NewNodes: {new_nodes}")
-        logger.debug(f"## Nodes: {nodes}")
-        logger.debug(f"## Partitions: {partitions}")
-
-    def _on_write_slurm_config(self, event) -> None:
+    def _on_write_slurm_config(
+        self,
+        event: Union[
+            ConfigChangedEvent, ElasticsearchAvailableEvent, ElasticsearchUnavailableEvent,
+            InfluxDBAvailableEvent, InfluxDBUnavailableEvent, SlurmctldPeerAvailableEvent,
+            SlurmdAvailableEvent, SlurmdBrokenEvent, SlurmdDepartedEvent,
+            SlurmdbdAvailableEvent,
+        ]
+    ) -> None:
         """Check that we have what we need before we proceed."""
         logger.debug("### Slurmctld - _on_write_slurm_config()")
 
@@ -296,7 +344,7 @@ class SlurmctldCharm(CharmBase):
             new_nodes_from_stored_state = self.new_nodes
             new_nodes_from_slurm_config = self._get_new_node_names_from_slurm_config(slurm_config)
 
-            transitioning_nodes = [
+            transitioning_nodes: list = [
                 node for node in new_nodes_from_stored_state
                 if node not in new_nodes_from_slurm_config
             ]
@@ -306,7 +354,7 @@ class SlurmctldCharm(CharmBase):
                 self.new_nodes = new_nodes_from_slurm_config.copy()
 
             # slurmrestd needs the slurm.conf file, so send it every time it changes.
-            if self._stored.slurmrestd_available:
+            if self._stored.slurmrestd_available is not False:
                 self._slurmrestd.set_slurm_config_on_app_relation_data(slurm_config)
                 # NOTE: scontrol reconfigure does not restart slurmrestd
                 self._slurmrestd.restart_slurmrestd()
@@ -327,9 +375,9 @@ class SlurmctldCharm(CharmBase):
     @property
     def cluster_name(self) -> str:
         """Return the cluster name."""
-        return self.config.get("cluster-name")
+        return self.config.get("cluster-name") or default_parameters["ClusterName"]
 
-    def _get_user_supplied_parameters(self) -> dict:
+    def _get_user_supplied_parameters(self) -> Dict[str, str]:
         """Gather, parse, and return the user supplied parameters."""
         user_supplied_parameters = {}
         if custom_config := self.config.get("slurm-conf-parameters"):
@@ -340,7 +388,7 @@ class SlurmctldCharm(CharmBase):
             }
         return user_supplied_parameters
 
-    def _get_addons_info(self) -> dict:
+    def _get_addons_info(self) -> Dict[str, Any]:
         """Assemble addons for slurm.conf."""
         return {
             **self._assemble_prolog_epilog(),
@@ -348,7 +396,7 @@ class SlurmctldCharm(CharmBase):
             **self._assemble_elastic_search_addon(),
         }
 
-    def _assemble_prolog_epilog(self) -> dict:
+    def _assemble_prolog_epilog(self) -> Dict[str, Any]:
         """Generate the prolog_epilog section of the addons."""
         logger.debug("## Generating prolog epilog configuration")
 
@@ -363,7 +411,7 @@ class SlurmctldCharm(CharmBase):
         """Generate the acct gather section of the addons."""
         logger.debug("## Generating acct gather configuration")
 
-        addons = {}
+        addons: dict = {}
         addons["AcctGatherProfileType"] = "acct_gather_profile/none"
 
         if influxdb_info := self._get_influxdb_info():
@@ -374,21 +422,23 @@ class SlurmctldCharm(CharmBase):
         # it is possible to setup influxdb or hdf5 profiles without the
         # relation, using the custom-config section of slurm.conf. We need to
         # support setting up the acct_gather configuration for this scenario
-        acct_gather_custom = self.config.get("acct-gather-custom")
-        if acct_gather_custom:
+        if acct_gather_custom := self.config.get("acct-gather-custom"):
             if not addons.get("acct_gather"):
                 addons["acct_gather"] = {}
 
-            addons["acct_gather"]["custom"] = acct_gather_custom
+            addons["acct_gather"]["custom"] = str(acct_gather_custom)
 
-        addons["JobAcctGatherFrequency"] = self.config.get("acct-gather-frequency")
+        addons["JobAcctGatherFrequency"] = (
+            self.config.get("acct-gather-frequency")
+            or default_parameters["JobAcctGatherFrequency"]
+        )
 
         return addons
 
-    def _assemble_elastic_search_addon(self) -> dict:
+    def _assemble_elastic_search_addon(self) -> Dict[str, str]:
         """Generate the acct gather section of the addons."""
         logger.debug("## Generating elastic search addon configuration")
-        addon = {}
+        addon: dict = {}
 
         elasticsearch_ingress = self._elasticsearch.elasticsearch_ingress
         if elasticsearch_ingress:
@@ -396,9 +446,9 @@ class SlurmctldCharm(CharmBase):
             addon = {"elasticsearch_address": f"{elasticsearch_ingress}{suffix}"}
         return addon
 
-    def _get_new_node_names_from_slurm_config(self, slurm_config: dict) -> list:
+    def _get_new_node_names_from_slurm_config(self, slurm_config: Dict[str, Any]) -> List[Optional[str]]:
         """Given the slurm_config, return the nodes that are DownNodes with reason 'New node.'"""
-        new_node_names = []
+        new_node_names: list = []
         if down_nodes_from_slurm_config := slurm_config.get("down_nodes"):
             for down_nodes_entry in down_nodes_from_slurm_config:
                  
@@ -407,7 +457,7 @@ class SlurmctldCharm(CharmBase):
                         new_node_names.append(down_node_name)
         return new_node_names
 
-    def _get_slurmdbd_parameters(self) -> dict:
+    def _get_slurmdbd_parameters(self) -> Dict[str, str]:
         """Return the slurmdbd parameters for the slurm.conf."""
         slurmdbd_parameters = {}
         if slurmdbd_info := self._slurmdbd.get_slurmdbd_info():
@@ -419,7 +469,7 @@ class SlurmctldCharm(CharmBase):
             }
         return slurmdbd_parameters
 
-    def _get_parameters(self) -> dict:
+    def _get_parameters(self) -> Dict[str, str]:
         """Return the slurm.conf parameters provided by this charm."""
         slurm_manager = self._slurm_manager
         mandatory_slurmctld_parameters = ["enable_configless"]
@@ -461,7 +511,7 @@ class SlurmctldCharm(CharmBase):
 
             "SlurmctldParameters": ",".join(slurmctld_parameters),
 
-            "ProctrackType": self.config.get("proctrack-type"),
+            "ProctrackType": self.config.get("proctrack-type") or "proctrack/linuxproc",
 
             # Deal with addons later
             "JobAcctGatherFrequency": self._get_addons_info()["JobAcctGatherFrequency"],
@@ -474,7 +524,7 @@ class SlurmctldCharm(CharmBase):
             **self._get_slurmdbd_parameters(),
         }
 
-    def _assemble_slurm_config(self) -> dict:
+    def _assemble_slurm_config(self) -> Dict[Any, Any]:
         """Assemble and return the slurm config."""
         # If we don't have slurmdbd relation then there isn't much we can do so bail out.
         if not self._get_slurmdbd_parameters():
@@ -509,9 +559,9 @@ class SlurmctldCharm(CharmBase):
 
     def is_slurm_installed(self) -> bool:
         """Return true/false based on whether or not slurm is installed."""
-        return self._stored.slurm_installed
+        return False if self._stored.slurm_installed is not True else True
 
-    def _check_status(self):  # noqa C901
+    def _check_status(self) -> bool:  # noqa C901
         """Check for all relations and set appropriate status.
 
         This charm needs these conditions to be satisfied in order to be ready:
@@ -523,7 +573,7 @@ class SlurmctldCharm(CharmBase):
         # NOTE: slurmd and slurmrestd are not needed for slurmctld to work,
         #       only for the cluster to operate. But we need slurmd inventory
         #       to assemble slurm.conf
-        if not self._stored.slurm_installed:
+        if self._stored.slurm_installed is not True:
             self.unit.status = BlockedStatus("Error installing slurmctld")
             return False
 
@@ -568,13 +618,13 @@ class SlurmctldCharm(CharmBase):
         self.unit.status = ActiveStatus("slurmctld available")
         return True
 
-    def get_munge_key(self) -> str:
+    def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
-        return self._stored.munge_key
+        return str(self._stored.munge_key)
 
-    def get_jwt_rsa(self) -> str:
+    def get_jwt_rsa(self) -> Optional[str]:
         """Get the stored jwt_rsa key."""
-        return self._stored.jwt_rsa
+        return str(self._stored.jwt_rsa)
 
     def _resume_nodes(self, nodelist: List[str]) -> None:
         """Run scontrol to resume the specified node list."""

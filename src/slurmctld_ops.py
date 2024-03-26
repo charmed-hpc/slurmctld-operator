@@ -11,8 +11,10 @@ import subprocess
 from base64 import b64decode, b64encode
 from pathlib import Path
 
-import charms.operator_libs_linux.v0.apt as apt
-import charms.operator_libs_linux.v1.systemd as systemd
+from typing import IO, Union
+
+import charms.operator_libs_linux.v0.apt as apt # type: ignore [import-untyped]
+import charms.operator_libs_linux.v1.systemd as systemd # type: ignore [import-untyped]
 import distro
 from Crypto.PublicKey import RSA
 from jinja2 import Environment, FileSystemLoader
@@ -25,6 +27,12 @@ logger = logging.getLogger()
 
 
 TEMPLATE_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "templates"
+
+
+
+class SlurmctldException(BaseException):
+    def __init__(self, msg):
+        pass
 
 
 SLURM_PPA_KEY: str = """
@@ -67,7 +75,7 @@ class Slurmctld:
     _package_name: str = "slurmctld"
     _keyring_path: Path = Path("/usr/share/keyrings/slurm-wlm.asc")
 
-    def _repo(self) -> None:
+    def _repo(self) -> apt.DebianRepository:
         """Return the slurmctld repo."""
         ppa_url: str = "https://ppa.launchpadcontent.net/ubuntu-hpc/slurm-wlm-23.02/ubuntu"
         sources_list: str = (
@@ -181,8 +189,7 @@ class SlurmctldManager(Object):
         """Return True if the slurm component is running."""
         try:
             cmd = f"systemctl is-active {self._slurm_systemd_service}"
-            r = subprocess.check_output(shlex.split(cmd))
-            r = r.decode().strip().lower()
+            r = subprocess.check_output(shlex.split(cmd)).decode().strip().lower()
             logger.debug(f"### systemctl is-active {self._slurm_systemd_service}: {r}")
             return "active" == r
         except subprocess.CalledProcessError as e:
@@ -452,12 +459,15 @@ class SlurmctldManager(Object):
             munge = subprocess.Popen(
                 shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            unmunge = subprocess.Popen(
-                ["unmunge"], stdin=munge.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            munge.stdout.close()
-            output = unmunge.communicate()[0]
-            if "Success" in output.decode():
+            if munge is not None:
+                unmunge = subprocess.Popen(
+                    ["unmunge"],
+                    stdin=munge.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                output = unmunge.communicate()[0].decode()
+            if "Success" in output:
                 logger.debug(f"## Munge working as expected: {output}")
                 return True
             logger.error(f"## Munge not working: {output}")
@@ -550,8 +560,8 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting munge")
             systemd.service_restart("munge")
-        except Exception("Error restarting munge") as e:
-            logger.error(e.message)
+        except:
+            logger.error("Cannot restart munge.")
             return False
         return self.check_munged()
 
@@ -563,8 +573,8 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting slurmctld")
             systemd.service_restart("slurmctld")
-        except Exception("Error restarting slurmctld") as e:
-            logger.error(e.message)
+        except:
+            logger.error("Error restarting slurmctld.")
             return False
         return True
 
@@ -582,8 +592,11 @@ class SlurmctldManager(Object):
 
     @property
     def slurm_installed(self) -> bool:
-        """Return the bool from the stored state."""
-        return self._stored.slurm_installed
+        """Return the bool from the stored state.
+
+        Note: Ignore return-value type for now until this is understood better.
+        """
+        return self._stored.slurm_installed # type: ignore [return-value]
 
     @property
     def slurm_component(self) -> str:
@@ -668,7 +681,7 @@ class SlurmctldManager(Object):
             self.remove_acct_gather_conf()
 
         # Write slurm.conf and restart the slurm component.
-        self.write_slurm_config(slurm_config)
+        self.write_slurm_conf(slurm_config)
 
     @property
     def needs_reboot(self) -> bool:
@@ -681,3 +694,11 @@ class SlurmctldManager(Object):
                 return True
 
         return False
+
+
+default_parameters: dict = {
+    "ClusterName": "charmedhpc",
+    "ProctrackType": "proctrack/linuxproc",
+    "JobAcctGatherFrequency": "task=30",
+    "JobAcctGatherType": "jobacct_gather/none",
+}

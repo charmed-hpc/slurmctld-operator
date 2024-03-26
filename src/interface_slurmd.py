@@ -2,7 +2,7 @@
 """Interface slurmd."""
 import json
 import logging
-from typing import List
+from typing import List, Union
 
 from ops.framework import EventBase, EventSource, Object, ObjectEvents, StoredState
 from ops.model import Relation
@@ -59,7 +59,7 @@ class Slurmd(Object):
         )
 
     @property
-    def _relations(self) -> List[Relation]:
+    def _relations(self) -> Union[List[Relation], None]:
         return self.framework.model.relations.get(self._relation_name)
 
     @property
@@ -135,7 +135,7 @@ class Slurmd(Object):
             self._charm.set_slurmd_available(False)
             self.on.slurmd_unavailable.emit()
 
-    def set_nhc_params(self, params: str = ""):
+    def set_nhc_params(self, params: str = "") -> None:
         """Send NHC parameters to all slurmd."""
         # juju does not allow setting empty data/strings on the relation data,
         # so we set it to something that behaves like empty
@@ -145,9 +145,10 @@ class Slurmd(Object):
         logger.debug(f"## set_nhc_params: {params}")
 
         if self.is_joined:
-            for relation in self._relations:
-                app = self.model.app
-                relation.data[app]["nhc_params"] = params
+            if relations := self._relations:
+                for relation in relations:
+                    app = self.model.app
+                    relation.data[app]["nhc_params"] = params
         else:
             logger.debug("## slurmd not joined")
 

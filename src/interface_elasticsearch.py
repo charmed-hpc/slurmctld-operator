@@ -11,15 +11,15 @@ class ElasticsearchAvailableEvent(EventBase):
     """ElasticsearchAvailable event."""
 
 
-class ElasticsearchUnAvailableEvent(EventBase):
-    """ElasticsearchUnAvailable event."""
+class ElasticsearchUnavailableEvent(EventBase):
+    """ElasticsearchUnavailable event."""
 
 
 class ElasticsearchEvents(ObjectEvents):
     """ElasticsearchEvents."""
 
     elasticsearch_available = EventSource(ElasticsearchAvailableEvent)
-    elasticsearch_unavailable = EventSource(ElasticsearchUnAvailableEvent)
+    elasticsearch_unavailable = EventSource(ElasticsearchUnavailableEvent)
 
 
 class Elasticsearch(Object):
@@ -62,7 +62,7 @@ class Elasticsearch(Object):
         """Return elasticsearch_ingress."""
         host = self._stored.elasticsearch_host
         port = self._stored.elasticsearch_port
-        if host:
+        if (host != "") and (port != ""):
             return f"http://{host}:{port}"
         else:
             return ""

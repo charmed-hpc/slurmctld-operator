@@ -13,7 +13,7 @@ class SlurmrestdAvailableEvent(EventBase):
     """Emitted when slurmrestd is available."""
 
 
-class SlurmrestdUnAvailableEvent(EventBase):
+class SlurmrestdUnavailableEvent(EventBase):
     """Emitted when the slurmrestd relation is broken."""
 
 
@@ -21,7 +21,7 @@ class SlurmrestdEvents(ObjectEvents):
     """SlurmrestdEvents."""
 
     slurmrestd_available = EventSource(SlurmrestdAvailableEvent)
-    slurmrestd_unavailable = EventSource(SlurmrestdUnAvailableEvent)
+    slurmrestd_unavailable = EventSource(SlurmrestdUnavailableEvent)
 
 
 class Slurmrestd(Object):

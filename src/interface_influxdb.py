@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+# Copyright (c) 2024 Omnivector, LLC
 """AcctGather (Influxdb) interface."""
 import json
 import logging
 import secrets
 import string
 
-import influxdb
+import influxdb # type: ignore [import-untyped]
 from ops.framework import EventBase, EventSource, Object, ObjectEvents, StoredState
 
 logger = logging.getLogger()
@@ -15,7 +16,7 @@ class InfluxDBAvailableEvent(EventBase):
     """InfluxDBAvailable event."""
 
 
-class InfluxDBUnAvailableEvent(EventBase):
+class InfluxDBUnavailableEvent(EventBase):
     """InfluxDBUnAvailable event."""
 
 
@@ -23,7 +24,7 @@ class InfluxDBEvents(ObjectEvents):
     """InfluxDBEvents."""
 
     influxdb_available = EventSource(InfluxDBAvailableEvent)
-    influxdb_unavailable = EventSource(InfluxDBUnAvailableEvent)
+    influxdb_unavailable = EventSource(InfluxDBUnavailableEvent)
 
 
 def generate_password(length=20):
@@ -150,7 +151,7 @@ class InfluxDB(Object):
     def get_influxdb_info(self) -> dict:
         """Return the influxdb info."""
         influxdb_info = self._stored.influxdb_info
-        if influxdb_info:
-            return json.loads(influxdb_info)
+        if influxdb_info != "":
+            return json.loads(influxdb_info) # type: ignore [arg-type]
         else:
             return {}

@@ -74,7 +74,7 @@ class PrologEpilog(Object):
              "slurmctld_prolog_path": "/path/to/executable"}
         """
         info = self._stored.prolog_epilog
-        if info:
-            return json.loads(info)
+        if info != "":
+            return json.loads(info) # type: ignore [arg-type]
         else:
             return {}

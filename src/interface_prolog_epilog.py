@@ -75,6 +75,6 @@ class PrologEpilog(Object):
         """
         info = self._stored.prolog_epilog
         if info != "":
-            return json.loads(info) # type: ignore [arg-type]
+            return json.loads(info)  # type: ignore [arg-type]
         else:
             return {}

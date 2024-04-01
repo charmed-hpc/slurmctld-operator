@@ -41,23 +41,11 @@ class TestCharm(unittest.TestCase):
         """Test that the cluster_name property works."""
         self.assertEqual(self.harness.charm.cluster_name, "osd-cluster")
 
-    @patch("interface_slurmctld_peer.SlurmctldPeer.get_slurmctld_info", return_value=([], {}, {}))
-    def test_slurmctld_info(self, info) -> None:
-        """Test that the slurmctld_info property works."""
-        self.assertEqual(self.harness.charm._slurmctld_parameters, info.return_value)
-
     @patch("interface_slurmdbd.Slurmdbd.get_slurmdbd_info", return_value={})
-    def test_slurmdbd_parameters(self, info) -> None:
+    def test_get_slurmdbd_parameters(self, info) -> None:
         """Test that the slurmdbd_info property works."""
-        self.assertEqual(self.harness.charm._slurmdbd_parameters, info.return_value)
-
-    def test_cluster_info(self) -> None:
-        """Test the cluster_info property works."""
-        self.assertEqual(type(self.harness.charm._cluster_info), dict)
-
-    def test_addons_info(self) -> None:
-        """Test that the addons_info property works."""
-        self.assertEqual(type(self.harness.charm._addons_info), dict)
+        print(f"DEBUGGING IN TEST: {self.harness.charm._get_slurmdbd_parameters()}")
+        self.assertEqual(self.harness.charm._get_slurmdbd_parameters(), info.return_value)
 
     def test_set_slurmd_available(self) -> None:
         """Test that the set_slurmd_available method works."""
@@ -136,11 +124,11 @@ class TestCharm(unittest.TestCase):
             self.harness.charm.unit.status, BlockedStatus("Error installing slurmctld")
         )
 
-    @patch("pathlib.Path.read_text", return_value="v1.0.0")
+    @patch("slurmctld_ops.Slurmctld.version", return_value="v0.0.0")
     def test_on_upgrade(self, *_) -> None:
         """Test that the on_upgrade method works,."""
         self.harness.charm.on.upgrade_charm.emit()
-        self.assertEqual(self.harness.get_workload_version(), "v1.0.0")
+        self.assertEqual(self.harness.get_workload_version(), "v0.0.0")
 
     def test_check_status_slurm_not_installed(self) -> None:
         """Test that the check_status method works when slurm is not installed."""

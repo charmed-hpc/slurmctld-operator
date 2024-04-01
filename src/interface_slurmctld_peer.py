@@ -4,13 +4,10 @@ import copy
 import json
 import logging
 import subprocess
-
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from ops import Relation
-
 from ops.framework import EventBase, EventSource, Object, ObjectEvents
-
 
 logger = logging.getLogger()
 
@@ -117,7 +114,9 @@ class SlurmctldPeer(Object):
                     else:
                         if len(slurmctld_peers) > 0:
                             app_relation_data["backup_controller"] = slurmctld_peers_tmp.pop()
-                            app_relation_data["standby_controllers"] = json.dumps(slurmctld_peers_tmp)
+                            app_relation_data["standby_controllers"] = json.dumps(
+                                slurmctld_peers_tmp
+                            )
                         else:
                             app_relation_data["backup_controller"] = ""
                             app_relation_data["standby_controllers"] = json.dumps([])
@@ -134,7 +133,7 @@ class SlurmctldPeer(Object):
                 ctxt = {
                     "ControlAddr": unit_relation_data["ingress-address"],
                     "ControlMachine": self._charm.hostname,
-               }
+                }
                 # If we have > 0 controllers (also have a backup), iterate over
                 # them retrieving the info for the backup and set it along with
                 # the info for the active controller, then emit the
@@ -143,7 +142,9 @@ class SlurmctldPeer(Object):
                     for unit in relation.units:
                         if unit.name == backup_controller:
                             unit_data = relation.data[unit]
-                            ctxt["backup_controller_ingress_address"] = unit_data["ingress-address"]
+                            ctxt["backup_controller_ingress_address"] = unit_data[
+                                "ingress-address"
+                            ]
                             ctxt["backup_controller_hostname"] = unit_data["hostname"]
                             ctxt["backup_controller_port"] = unit_data["port"]
                 app_relation_data["slurmctld_info"] = json.dumps(ctxt)
@@ -162,6 +163,7 @@ class SlurmctldPeer(Object):
                     if slurmctld_info := app_data.get("slurmctld_info"):
                         return json.loads(slurmctld_info)
         return None
+
 
 def _related_units(relid) -> List[Any]:
     """List of related units."""

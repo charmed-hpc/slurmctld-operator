@@ -11,10 +11,8 @@ import subprocess
 from base64 import b64decode, b64encode
 from pathlib import Path
 
-from typing import IO, Union
-
-import charms.operator_libs_linux.v0.apt as apt # type: ignore [import-untyped]
-import charms.operator_libs_linux.v1.systemd as systemd # type: ignore [import-untyped]
+import charms.operator_libs_linux.v0.apt as apt  # type: ignore [import-untyped]
+import charms.operator_libs_linux.v1.systemd as systemd  # type: ignore [import-untyped]
 import distro
 from Crypto.PublicKey import RSA
 from jinja2 import Environment, FileSystemLoader
@@ -29,8 +27,9 @@ logger = logging.getLogger()
 TEMPLATE_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "templates"
 
 
-
 class SlurmctldException(BaseException):
+    """Slurmctld generic exception."""
+
     def __init__(self, msg):
         pass
 
@@ -461,10 +460,7 @@ class SlurmctldManager(Object):
             )
             if munge is not None:
                 unmunge = subprocess.Popen(
-                    ["unmunge"],
-                    stdin=munge.stdout,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
+                    ["unmunge"], stdin=munge.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
                 output = unmunge.communicate()[0].decode()
             if "Success" in output:
@@ -560,7 +556,7 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting munge")
             systemd.service_restart("munge")
-        except:
+        except SlurmctldException("Cannot restart munge."):
             logger.error("Cannot restart munge.")
             return False
         return self.check_munged()
@@ -573,7 +569,7 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting slurmctld")
             systemd.service_restart("slurmctld")
-        except:
+        except SlurmctldException("Cannot restart slurmctld."):
             logger.error("Error restarting slurmctld.")
             return False
         return True
@@ -596,7 +592,7 @@ class SlurmctldManager(Object):
 
         Note: Ignore return-value type for now until this is understood better.
         """
-        return self._stored.slurm_installed # type: ignore [return-value]
+        return self._stored.slurm_installed  # type: ignore [return-value]
 
     @property
     def slurm_component(self) -> str:

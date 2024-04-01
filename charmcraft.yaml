@@ -32,18 +32,8 @@ requires:
     interface: slurmdbd
   slurmrestd:
     interface: slurmrestd
-  influxdb-api:
-    interface: influxdb-api
-  elasticsearch:
-    interface: elasticsearch
   fluentbit:
     interface: fluentbit
-provides:
-  prolog-epilog:
-    interface: prolog-epilog
-  grafana-source:
-    interface: grafana-source
-    scope: global
 
 assumes:
   - juju
@@ -61,20 +51,6 @@ bases:
 
 config:
   options:
-    custom-slurm-repo:
-      type: string
-      default: ""
-      description: |
-        Use a custom repository for Slurm installation.
-  
-        This can be set to the Organization's local mirror/cache of packages and
-        supersedes the Omnivector repositories. Alternatively, it can be used to
-        track a `testing` Slurm version, e.g. by setting to
-        `ppa:omnivector/osd-testing`.
-  
-        Note: The configuration `custom-slurm-repo` must be set *before*
-        deploying the units. Changing this value after deploying the units will
-        not reinstall Slurm.
     cluster-name:
       type: string
       default: osd-cluster
@@ -123,35 +99,17 @@ config:
         This option can be used to customize how NHC is called, e.g. to send an
         e-mail to an admin when NHC detects an error set this value to
         `-M admin@domain.com`.
+
     health-check-interval:
       default: 600
       type: int
       description: Interval in seconds between executions of the Health Check.
+
     health-check-state:
       default: "ANY,CYCLE"
       type: string
       description: Only run the Health Check on nodes in this state.
   
-    acct-gather-frequency:
-      type: string
-      default: "task=30"
-      description: |
-        Accounting and profiling sampling intervals for the acct_gather plugins.
-  
-        Note: A value of `0` disables the periodic sampling. In this case, the
-        accounting information is collected when the job terminates.
-  
-        Example usage:
-        $ juju config slurmcltd acct-gather-frequency="task=30,network=30"
-    acct-gather-custom:
-      type: string
-      default: ""
-      description: |
-        User supplied `acct_gather.conf` configuration.
-  
-        This value supplements the charm supplied `acct_gather.conf` file that is
-        used for configuring the acct_gather plugins.
-
 actions:
   show-current-config:
     description: |
@@ -163,7 +121,6 @@ actions:
       juju run slurmctld/leader show-current-config \
           --quiet --format=json  | jq .[].results.slurm.conf | xargs -I % -0 python3 -c 'print(%)'
       ```
-
   drain:
     description: |
       Drain specified nodes.
@@ -195,10 +152,3 @@ actions:
           The nodes to resume, using the Slurm format, e.g. `node-[1,2]`.
     required:
       - nodename
-  
-  influxdb-info:
-    description: |
-      Get InfluxDB info.
-  
-      This action returns the host, port, username, password, database, and
-      retention policy regarding to InfluxDB.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2020 Omnivector Solutions, LLC
+# Copyright 2024 Omnivector, LLC
 # See LICENSE file for licensing details.
 
 """SlurmctldCharm."""
@@ -7,29 +7,9 @@
 import logging
 import shlex
 import subprocess
+from typing import Any, Dict, List, Optional, Union
 
-from typing import Any, Dict, List, Optional, Union, overload
-
-from charms.fluentbit.v0.fluentbit import FluentbitClient # type: ignore
-from interface_elasticsearch import (
-    Elasticsearch,
-    ElasticsearchAvailableEvent,
-    ElasticsearchUnavailableEvent,
-)
-from interface_grafana_source import (
-    GrafanaSource,
-    GrafanaSourceAvailableEvent,
-)
-from interface_influxdb import (
-    InfluxDB,
-    InfluxDBAvailableEvent,
-    InfluxDBUnavailableEvent,
-)
-from interface_prolog_epilog import (
-    PrologEpilog,
-    PrologEpilogAvailableEvent,
-    PrologEpilogUnavailableEvent,
-)
+from charms.fluentbit.v0.fluentbit import FluentbitClient  # type: ignore
 from interface_slurmctld_peer import (
     SlurmctldPeer,
     SlurmctldPeerAvailableEvent,
@@ -50,23 +30,19 @@ from interface_slurmrestd import (
     SlurmrestdAvailableEvent,
     SlurmrestdUnavailableEvent,
 )
-
 from ops import (
     ActionEvent,
     ConfigChangedEvent,
-    HookEvent,
     InstallEvent,
     RelationCreatedEvent,
     UpdateStatusEvent,
     UpgradeCharmEvent,
 )
-
 from ops.charm import CharmBase
-from ops.framework import StoredState, StoredList
+from ops.framework import StoredState
 from ops.main import main
 from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 from slurmctld_ops import SlurmctldManager, default_parameters
-
 
 logger = logging.getLogger()
 
@@ -96,11 +72,7 @@ class SlurmctldCharm(CharmBase):
         self._slurmdbd = Slurmdbd(self, "slurmdbd")
         self._slurmrestd = Slurmrestd(self, "slurmrestd")
         self._slurmctld_peer = SlurmctldPeer(self, "slurmctld-peer")
-        self._prolog_epilog = PrologEpilog(self, "prolog-epilog")
 
-        self._grafana = GrafanaSource(self, "grafana-source")
-        self._influxdb = InfluxDB(self, "influxdb-api")
-        self._elasticsearch = Elasticsearch(self, "elasticsearch")
         self._fluentbit = FluentbitClient(self, "fluentbit")
 
         event_handler_bindings = {
@@ -123,30 +95,21 @@ class SlurmctldCharm(CharmBase):
             self._slurmctld_peer.on.slurmctld_peer_available: self._on_write_slurm_config,
             # fluentbit
             self.on["fluentbit"].relation_created: self._on_fluentbit_relation_created,
-            # Addons lifecycle events
-            self._prolog_epilog.on.prolog_epilog_available: self._on_write_slurm_config,
-            self._prolog_epilog.on.prolog_epilog_unavailable: self._on_write_slurm_config,
-            self._grafana.on.grafana_available: self._on_grafana_available,
-            self._influxdb.on.influxdb_available: self._on_influxdb_available,
-            self._influxdb.on.influxdb_unavailable: self._on_write_slurm_config,
-            self._elasticsearch.on.elasticsearch_available: self._on_elasticsearch_available,
-            self._elasticsearch.on.elasticsearch_unavailable: self._on_write_slurm_config,
             # actions
             self.on.show_current_config_action: self._on_show_current_config,
             self.on.drain_action: self._drain_nodes_action,
             self.on.resume_action: self._resume_nodes_action,
-            self.on.influxdb_info_action: self._infludb_info_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
 
     @property
-    def new_nodes(self) -> List[Any]: 
+    def new_nodes(self) -> List[Any]:
         """Return new_nodes from StoredState.
 
         Note: Ignore the attr-defined for now until this is fixed upstream.
         """
-        return [node for node in self._stored.new_nodes] # type: ignore [attr-defined]
+        return list(self._stored.new_nodes)  # type: ignore [attr-defined]
 
     @new_nodes.setter
     def new_nodes(self, new_nodes: List[Any]) -> None:
@@ -230,30 +193,6 @@ class SlurmctldCharm(CharmBase):
         self._set_slurmdbd_available(False)
         self._check_status()
 
-    def _on_grafana_available(self, event: GrafanaSourceAvailableEvent) -> None:
-        """Create the grafana-source if we are the leader and have influxdb."""
-        if not self._is_leader():
-            return
-
-        influxdb_info = self._get_influxdb_info()
-
-        if influxdb_info:
-            self._grafana.set_grafana_source_info(influxdb_info)
-        else:
-            logger.error("## Can not set Grafana source: missing influxdb relation")
-
-    def _on_influxdb_available(self, event: InfluxDBAvailableEvent) -> None:
-        """Assemble addons to forward slurm data to influxdb."""
-        self._on_write_slurm_config(event)
-
-    def _on_elasticsearch_available(self, event: ElasticsearchAvailableEvent) -> None:
-        """Assemble addons to forward Slurm data to elasticsearch."""
-        self._on_write_slurm_config(event)
-
-    def _get_influxdb_info(self) -> Dict[Any, Any]:
-        """Return influxdb info."""
-        return self._influxdb.get_influxdb_info()
-
     def _drain_nodes_action(self, event: ActionEvent) -> None:
         """Drain specified nodes."""
         nodes = event.params["nodename"]
@@ -283,26 +222,16 @@ class SlurmctldCharm(CharmBase):
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
-    def _infludb_info_action(self, event: ActionEvent) -> None:
-        influxdb_info = self._get_influxdb_info()
-
-        if not influxdb_info:
-            info = {"status": "not related"}
-        else:
-            # Juju does not like underscores in dictionaries
-            info = {k.replace("_", "-"): v for k, v in influxdb_info.items()}
-
-        logger.debug(f"## InfluxDB-info action: {influxdb_info}")
-        event.set_results({"influxdb.info": info})
-
     def _on_write_slurm_config(
         self,
         event: Union[
-            ConfigChangedEvent, ElasticsearchAvailableEvent, ElasticsearchUnavailableEvent,
-            InfluxDBAvailableEvent, InfluxDBUnavailableEvent, SlurmctldPeerAvailableEvent,
-            SlurmdAvailableEvent, SlurmdBrokenEvent, SlurmdDepartedEvent,
+            ConfigChangedEvent,
+            SlurmctldPeerAvailableEvent,
+            SlurmdAvailableEvent,
+            SlurmdBrokenEvent,
+            SlurmdDepartedEvent,
             SlurmdbdAvailableEvent,
-        ]
+        ],
     ) -> None:
         """Check that we have what we need before we proceed."""
         logger.debug("### Slurmctld - _on_write_slurm_config()")
@@ -345,7 +274,8 @@ class SlurmctldCharm(CharmBase):
             new_nodes_from_slurm_config = self._get_new_node_names_from_slurm_config(slurm_config)
 
             transitioning_nodes: list = [
-                node for node in new_nodes_from_stored_state
+                node
+                for node in new_nodes_from_stored_state
                 if node not in new_nodes_from_slurm_config
             ]
 
@@ -388,70 +318,14 @@ class SlurmctldCharm(CharmBase):
             }
         return user_supplied_parameters
 
-    def _get_addons_info(self) -> Dict[str, Any]:
-        """Assemble addons for slurm.conf."""
-        return {
-            **self._assemble_prolog_epilog(),
-            **self._assemble_acct_gather_addon(),
-            **self._assemble_elastic_search_addon(),
-        }
-
-    def _assemble_prolog_epilog(self) -> Dict[str, Any]:
-        """Generate the prolog_epilog section of the addons."""
-        logger.debug("## Generating prolog epilog configuration")
-
-        prolog_epilog = self._prolog_epilog.get_prolog_epilog()
-
-        if prolog_epilog:
-            return {"prolog_epilog": prolog_epilog}
-        else:
-            return {}
-
-    def _assemble_acct_gather_addon(self) -> dict:
-        """Generate the acct gather section of the addons."""
-        logger.debug("## Generating acct gather configuration")
-
-        addons: dict = {}
-        addons["AcctGatherProfileType"] = "acct_gather_profile/none"
-
-        if influxdb_info := self._get_influxdb_info():
-            addons["acct_gather"] = influxdb_info
-            addons["acct_gather"]["default"] = "all"
-            addons["AcctGatherProfileType"] = "acct_gather_profile/influxdb"
-
-        # it is possible to setup influxdb or hdf5 profiles without the
-        # relation, using the custom-config section of slurm.conf. We need to
-        # support setting up the acct_gather configuration for this scenario
-        if acct_gather_custom := self.config.get("acct-gather-custom"):
-            if not addons.get("acct_gather"):
-                addons["acct_gather"] = {}
-
-            addons["acct_gather"]["custom"] = str(acct_gather_custom)
-
-        addons["JobAcctGatherFrequency"] = (
-            self.config.get("acct-gather-frequency")
-            or default_parameters["JobAcctGatherFrequency"]
-        )
-
-        return addons
-
-    def _assemble_elastic_search_addon(self) -> Dict[str, str]:
-        """Generate the acct gather section of the addons."""
-        logger.debug("## Generating elastic search addon configuration")
-        addon: dict = {}
-
-        elasticsearch_ingress = self._elasticsearch.elasticsearch_ingress
-        if elasticsearch_ingress:
-            suffix = f"/{self.cluster_name}/jobcomp"
-            addon = {"elasticsearch_address": f"{elasticsearch_ingress}{suffix}"}
-        return addon
-
-    def _get_new_node_names_from_slurm_config(self, slurm_config: Dict[str, Any]) -> List[Optional[str]]:
-        """Given the slurm_config, return the nodes that are DownNodes with reason 'New node.'"""
+    def _get_new_node_names_from_slurm_config(
+        self, slurm_config: Dict[str, Any]
+    ) -> List[Optional[str]]:
+        """Given the slurm_config, return the nodes that are DownNodes with reason 'New node.'."""
         new_node_names: list = []
         if down_nodes_from_slurm_config := slurm_config.get("down_nodes"):
             for down_nodes_entry in down_nodes_from_slurm_config:
-                 
+
                 for down_node_name in down_nodes_entry["DownNodes"]:
                     if down_nodes_entry["Reason"] == "New node.":
                         new_node_names.append(down_node_name)
@@ -496,31 +370,17 @@ class SlurmctldCharm(CharmBase):
 
         return {
             "ClusterName": self.cluster_name,
-
             "ControlAddr": slurmctld_info["ControlAddr"],
-
             "ControlMachine": slurmctld_info["ControlMachine"],
-
             "HealthCheckInterval": self.config.get("health-check-interval")
             or default_health_check_interval,
-
             "HealthCheckNodeState": self.config.get("health-check-state")
             or default_health_check_state,
-
             "HealthCheckProgram": health_check_program,
-
             "SlurmctldParameters": ",".join(slurmctld_parameters),
-
             "ProctrackType": self.config.get("proctrack-type") or "proctrack/linuxproc",
-
-            # Deal with addons later
-            "JobAcctGatherFrequency": self._get_addons_info()["JobAcctGatherFrequency"],
-            "AcctGatherProfileType": self._get_addons_info()["AcctGatherProfileType"],
-
             **charm_maintained_parameters,
-
             **user_supplied_parameters,
-
             **self._get_slurmdbd_parameters(),
         }
 

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import List, Union
 
-from ops.framework import EventBase, EventSource, Object, ObjectEvents, StoredState
+from ops.framework import EventBase, EventSource, Object, ObjectEvents
 from ops.model import Relation
 
 logger = logging.getLogger()
@@ -110,8 +110,10 @@ class Slurmd(Object):
         if unit_data := event.relation.data.get(event.unit):
             if node := unit_data.get("node"):
                 node = json.loads(node)
-                if node.get("new_node") == True:
-                    all_new_nodes = list(set(new_nodes_from_charm + [node.get("node_config").get("NodeName")]))
+                if node.get("new_node"):
+                    all_new_nodes = list(
+                        set(new_nodes_from_charm + [node.get("node_config").get("NodeName")])
+                    )
                     self._charm.new_nodes = all_new_nodes
             else:
                 logger.debug(f"`node` data does not exist for unit: {event.unit}.")

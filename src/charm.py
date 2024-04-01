@@ -109,7 +109,7 @@ class SlurmctldCharm(CharmBase):
 
         Note: Ignore the attr-defined for now until this is fixed upstream.
         """
-        return list(self._stored.new_nodes)  # type: ignore [attr-defined]
+        return list(self._stored.new_nodes)  # type: ignore [call-overload]
 
     @new_nodes.setter
     def new_nodes(self, new_nodes: List[Any]) -> None:

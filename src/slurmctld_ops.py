@@ -31,7 +31,13 @@ class SlurmctldException(BaseException):
     """Slurmctld generic exception."""
 
     def __init__(self, msg):
-        pass
+        self.msg = msg
+
+        super().__init__(msg)
+
+    def __str__(self):
+        """Return the exception message."""
+        return self.msg
 
 
 SLURM_PPA_KEY: str = """
@@ -556,8 +562,9 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting munge")
             systemd.service_restart("munge")
-        except SlurmctldException("Cannot restart munge."):
+        except SlurmctldException("Cannot restart munge.") as e:  # type: ignore[misc]
             logger.error("Cannot restart munge.")
+            logger.error(e)
             return False
         return self.check_munged()
 
@@ -569,8 +576,9 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting slurmctld")
             systemd.service_restart("slurmctld")
-        except SlurmctldException("Cannot restart slurmctld."):
+        except SlurmctldException("Cannot restart slurmctld.") as e:  # type: ignore[misc]
             logger.error("Error restarting slurmctld.")
+            logger.error(e)
             return False
         return True
 

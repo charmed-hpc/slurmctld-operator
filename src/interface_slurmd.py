@@ -106,11 +106,13 @@ class Slurmd(Object):
         # of relation-changed so we check for it here in order to prevent things
         # from blowing up. Not much to do if we don't have it other than log
         # and proceed.
+        new_nodes_from_charm = self._charm.new_nodes
         if unit_data := event.relation.data.get(event.unit):
             if node := unit_data.get("node"):
                 node = json.loads(node)
                 if node.get("new_node") == True:
-                    self._charm.new_nodes.append(node.get("node_config").get("NodeName"))
+                    all_new_nodes = list(set(new_nodes_from_charm + [node.get("node_config").get("NodeName")]))
+                    self._charm.new_nodes = all_new_nodes
             else:
                 logger.debug(f"`node` data does not exist for unit: {event.unit}.")
                 return

@@ -28,19 +28,6 @@ logger = logging.getLogger()
 TEMPLATE_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "templates"
 
 
-class SlurmctldException(BaseException):
-    """Slurmctld generic exception."""
-
-    def __init__(self, msg):
-        self.msg = msg
-
-        super().__init__(msg)
-
-    def __str__(self):
-        """Return the exception message."""
-        return self.msg
-
-
 SLURM_PPA_KEY: str = """
 -----BEGIN PGP PUBLIC KEY BLOCK-----
 Comment: Hostname:
@@ -537,7 +524,7 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting munge")
             systemd.service_restart("munge")
-        except SlurmctldException("Cannot restart munge.") as e:  # type: ignore[misc]
+        except systemd.SystemdError as e:
             logger.error("Cannot restart munge.")
             logger.error(e)
             return False
@@ -551,7 +538,7 @@ class SlurmctldManager(Object):
         try:
             logger.debug("## Restarting slurmctld")
             systemd.service_restart("slurmctld")
-        except SlurmctldException("Cannot restart slurmctld.") as e:  # type: ignore[misc]
+        except systemd.SystemdError as e:
             logger.error("Error restarting slurmctld.")
             logger.error(e)
             return False

@@ -116,21 +116,58 @@ class SlurmctldCharm(CharmBase):
         """Set the new nodes."""
         self._stored.new_nodes = new_nodes
 
+    @property
+    def slurm_installed(self) -> bool:
+        """Return slurm_installed from stored state."""
+        return self._stored.slurm_installed
+
+    @slurm_installed.setter
+    def slurm_installed(self, slurm_installed: bool) -> None:
+        """Set slurm_installed in stored state."""
+        self._stored.slurm_installed = slurm_installed
+
+    @property
+    def slurmd_available(self) -> bool:
+        """Return slurmd_available from stored state."""
+        return self._stored.slurmd_available
+
+    @slurmd_available.setter
+    def slurmd_available(self, slurmd_available: bool) -> None:
+        """Set slurmd_available in stored state."""
+        self._stored.slurmd_available = slurmd_available
+
+    @property
+    def slurmdbd_available(self) -> bool:
+        """Return slurmdbd_available from stored state."""
+        return self._stored.slurmdbd_available
+
+    @slurmdbd_available.setter
+    def slurmdbd_available(self, slurmdbd_available: bool) -> None:
+        """Set slurmdbd_available in stored state."""
+        self._stored.slurmdbd_available = slurmdbd_available
+
+    @property
+    def slurmrestd_available(self) -> bool:
+        """Return slurmrestd_available from stored state."""
+        return self._stored.slurmrestd_available
+
+    @slurmrestd_available.setter
+    def slurmrestd_available(self, slurmrestd_available: bool) -> None:
+        """Set slurmrestd_available in stored state."""
+        self._stored.slurmrestd_available = slurmrestd_available
+
     def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
         self.unit.status = WaitingStatus("Installing slurmctld")
 
-        successful_installation = self._slurm_manager.install()
-
-        self.unit.set_workload_version(self._slurm_manager.version())
-
-        if successful_installation:
-            self._stored.slurm_installed = True
+        if self._slurm_manager.install():
+            self.unit.set_workload_version(self._slurm_manager.version())
+            self.slurm_installed = True
 
             # Store the munge_key and jwt_rsa key in the stored state.
             # NOTE: Use leadership settings instead of stored state when
             # leadership settings support becomes available in the framework.
-            if self._is_leader():
+            if self.model.unit.is_leader():
                 # NOTE the backup controller should also have the jwt and munge
                 #      keys configured. We should move these information to the
                 #      peer relation.
@@ -183,14 +220,12 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmrestd_unavailable(self, event: SlurmrestdUnavailableEvent) -> None:
         """Set slurmrestd_available to False."""
-        self.set_slurmrestd_available(False)
+        self.slurmrestd_available = False
 
     def _on_slurmdbd_available(self, event: SlurmdbdAvailableEvent) -> None:
-        self._set_slurmdbd_available(True)
         self._on_write_slurm_config(event)
 
     def _on_slurmdbd_unavailable(self, event: SlurmdbdUnavailableEvent) -> None:
-        self._set_slurmdbd_available(False)
         self._check_status()
 
     def _drain_nodes_action(self, event: ActionEvent) -> None:
@@ -237,7 +272,7 @@ class SlurmctldCharm(CharmBase):
         logger.debug("### Slurmctld - _on_write_slurm_config()")
 
         # only the leader should write the config, restart, and scontrol reconf
-        if not self._is_leader():
+        if not self.model.unit.is_leader():
             return
 
         if not self._check_status():
@@ -402,25 +437,6 @@ class SlurmctldCharm(CharmBase):
         logger.debug(f"slurm.conf: {slurm_conf}")
         return slurm_conf
 
-    def set_slurmd_available(self, flag: bool) -> None:
-        """Set stored value of slurmd available."""
-        self._stored.slurmd_available = flag
-
-    def _set_slurmdbd_available(self, flag: bool) -> None:
-        """Set stored value of slurmdbd available."""
-        self._stored.slurmdbd_available = flag
-
-    def set_slurmrestd_available(self, flag: bool) -> None:
-        """Set stored value of slurmdrest available."""
-        self._stored.slurmrestd_available = flag
-
-    def _is_leader(self) -> bool:
-        return self.model.unit.is_leader()
-
-    def is_slurm_installed(self) -> bool:
-        """Return true/false based on whether or not slurm is installed."""
-        return False if self._stored.slurm_installed is not True else True
-
     def _check_status(self) -> bool:  # noqa C901
         """Check for all relations and set appropriate status.
 
@@ -433,7 +449,7 @@ class SlurmctldCharm(CharmBase):
         # NOTE: slurmd and slurmrestd are not needed for slurmctld to work,
         #       only for the cluster to operate. But we need slurmd inventory
         #       to assemble slurm.conf
-        if self._stored.slurm_installed is not True:
+        if not self.slurm_installed:
             self.unit.status = BlockedStatus("Error installing slurmctld")
             return False
 
@@ -448,11 +464,11 @@ class SlurmctldCharm(CharmBase):
         #       it is not acounted for in here
         statuses = {
             "slurmd": {
-                "available": self._stored.slurmd_available,
+                "available": self.slurmd_available,
                 "joined": self._slurmd.is_joined,
             },
             "slurmdbd": {
-                "available": self._stored.slurmdbd_available,
+                "available": self.slurmdbd_available,
                 "joined": self._slurmdbd.is_joined,
             },
         }

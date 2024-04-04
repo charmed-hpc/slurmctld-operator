@@ -76,7 +76,8 @@ class Slurmd(Object):
         """Set our data on the relation."""
         # Check that slurm has been installed so that we know the munge key is
         # available. Defer if slurm has not been installed yet.
-        if not self._charm.is_slurm_installed():
+        if not self._charm.slurm_installed:
+            logger.debug("Deferring event as slurm is not yet installed.")
             event.defer()
             return
 
@@ -96,7 +97,7 @@ class Slurmd(Object):
         """Emit slurmd available event and update new_nodes."""
         if app_data := event.relation.data.get(event.app):
             if app_data.get("partition_info"):
-                self._charm.set_slurmd_available(True)
+                self._charm.slurmd_available = True
                 self.on.slurmd_available.emit()
             else:
                 event.defer()
@@ -136,7 +137,7 @@ class Slurmd(Object):
         if self._num_relations:
             self.on.slurmd_available.emit()
         else:
-            self._charm.set_slurmd_available(False)
+            self._charm.slurmd_available = False
             self.on.slurmd_unavailable.emit()
 
     def set_nhc_params(self, params: str = "") -> None:

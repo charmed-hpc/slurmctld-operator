@@ -10,6 +10,7 @@ import socket
 import subprocess
 from base64 import b64decode, b64encode
 from pathlib import Path
+from typing import Dict
 
 import charms.operator_libs_linux.v0.apt as apt  # type: ignore [import-untyped]
 import charms.operator_libs_linux.v1.systemd as systemd  # type: ignore [import-untyped]
@@ -307,7 +308,7 @@ class SlurmctldManager(Object):
         """Return the slurmd group."""
         return "root"
 
-    def create_systemd_override_for_nofile(self):
+    def create_systemd_override_for_nofile(self) -> None:
         """Create the override.conf file for slurm systemd service."""
         systemd_override_dir = Path(f"/etc/systemd/system/{self._slurm_systemd_service}.d")
         if not systemd_override_dir.exists():
@@ -318,34 +319,7 @@ class SlurmctldManager(Object):
 
         shutil.copyfile(systemd_override_conf_tmpl, systemd_override_conf)
 
-    def write_acct_gather_conf(self, context: dict) -> None:
-        """Render the acct_gather.conf."""
-        template_name = "acct_gather.conf.tmpl"
-        source = TEMPLATE_DIR / template_name
-        target = self._slurm_conf_dir / "acct_gather.conf"
-
-        if not isinstance(context, dict):
-            raise TypeError("Incorrect type for config.")
-
-        if not source.exists():
-            raise FileNotFoundError("The acct_gather template cannot be found.")
-
-        rendered_template = Environment(loader=FileSystemLoader(TEMPLATE_DIR)).get_template(
-            template_name
-        )
-
-        if target.exists():
-            target.unlink()
-
-        target.write_text(rendered_template.render(context))
-
-    def remove_acct_gather_conf(self) -> None:
-        """Remove acct_gather.conf."""
-        target = self._slurm_conf_dir / "acct_gather.conf"
-        if target.exists():
-            target.unlink()
-
-    def get_charm_maintained_slurm_config_parameters(self):
+    def get_charm_maintained_slurm_config_parameters(self) -> Dict[str, str]:
         """Return slurm.conf parameters maintained my this charm."""
         return {
             "AuthInfo": f"socket={self.munge_socket}",
@@ -361,6 +335,7 @@ class SlurmctldManager(Object):
             "PlugStackConfig": f"{self._slurm_plugstack_conf}",
             "SlurmUser": self._slurm_user,
             "SlurmdUser": self._slurmd_user,
+            "RebootProgram": "'/usr/sbin/reboot --reboot'",
         }
 
     def write_slurm_conf(self, slurm_conf: dict) -> None:
@@ -387,12 +362,12 @@ class SlurmctldManager(Object):
         user_group = f"{self._slurm_user}:{self._slurm_group}"
         subprocess.call(["chown", user_group, target])
 
-    def write_munge_key(self, munge_key):
+    def write_munge_key(self, munge_key) -> None:
         """Base64 decode and write the munge key."""
         key = b64decode(munge_key.encode())
         self._munge_key_path.write_bytes(key)
 
-    def write_jwt_rsa(self, jwt_rsa):
+    def write_jwt_rsa(self, jwt_rsa) -> None:
         """Write the jwt_rsa key."""
         # Remove jwt_rsa if exists.
         if self._jwt_rsa_key_file.exists():
@@ -539,7 +514,7 @@ class SlurmctldManager(Object):
 
         plugstack_conf.write_text(f"include {plugstack_dir}/*.conf")
 
-    def _setup_paths(self):
+    def _setup_paths(self) -> None:
         """Create needed paths with correct permissions."""
         user = f"{self._slurm_user}:{self._slurm_group}"
 
@@ -670,22 +645,6 @@ class SlurmctldManager(Object):
         self._stored.slurm_installed = True
 
         return True
-
-    def render_slurm_conf(self, slurm_config) -> None:
-        """Render the slurm.conf and munge key, restart slurm and munge."""
-        if not isinstance(slurm_config, dict):
-            raise TypeError("Incorrect type for config.")
-
-        # acct_gather config will not always exist. We need to check for
-        # acct_gather and only write the acct_gather.conf if we have
-        # acct_gather in the slurm_config object.
-        if slurm_config.get("acct_gather"):
-            self.write_acct_gather_conf(slurm_config)
-        else:
-            self.remove_acct_gather_conf()
-
-        # Write slurm.conf and restart the slurm component.
-        self.write_slurm_conf(slurm_config)
 
     @property
     def needs_reboot(self) -> bool:

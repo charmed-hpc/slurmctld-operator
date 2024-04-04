@@ -37,22 +37,12 @@ PlugStackConfig={{ PlugStackConfig }}
 
 ProctrackType={{ ProctrackType }}
 
-AcctGatherProfileType={{ AcctGatherProfileType }}
-JobAcctGatherFrequency={{ JobAcctGatherFrequency }}
-JobAcctGatherType=jobacct_gather/linux
-
-RebootProgram="/usr/sbin/reboot --reboot"
+RebootProgram={{ RebootProgram }}
 
 # User specified config
 {{custom_config}}
 
-{% if elasticsearch_address  %}
-# Job completion elasticsearch configuration
-JobCompType=jobcomp/elasticsearch
-JobCompLoc={{elasticsearch_address}}
-JobCompParams=timeout=5
-{% endif %}
-
+# NHC Configuration
 HealthCheckProgram={{HealthCheckProgram}}
 HealthCheckInterval={{HealthCheckInterval}}
 HealthCheckNodeState={{HealthCheckNodeState}}

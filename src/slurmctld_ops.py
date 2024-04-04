@@ -335,7 +335,7 @@ class SlurmctldManager(Object):
             "PlugStackConfig": f"{self._slurm_plugstack_conf}",
             "SlurmUser": self._slurm_user,
             "SlurmdUser": self._slurmd_user,
-            "RebootProgram": "'/usr/sbin/reboot --reboot'",
+            "RebootProgram": '"/usr/sbin/reboot --reboot"',
         }
 
     def write_slurm_conf(self, slurm_conf: dict) -> None:

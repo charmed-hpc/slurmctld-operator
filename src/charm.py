@@ -10,6 +10,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 
 import charms.hpc_libs.v0.slurm_ops as slurm
+from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 from constants import CHARM_MAINTAINED_SLURM_CONF_PARAMETERS, SLURM_CONF_PATH, SNAP_COMMON
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -73,6 +74,13 @@ class SlurmctldCharm(CharmBase):
         self._slurmd = Slurmd(self, "slurmd")
         self._slurmdbd = Slurmdbd(self, "slurmdbd")
         self._slurmrestd = Slurmrestd(self, "slurmrestd")
+        self._grafana_agent = COSAgentProvider(
+            self,
+            metrics_endpoints=[{"path": "/metrics", "port": 9092}],
+            metrics_rules_dir="./src/cos/alert_rules/prometheus",
+            dashboard_dirs=["./src/cos/grafana_dashboards"],
+            recurse_rules_dirs=True,
+        )
 
         event_handler_bindings = {
             self.on.install: self._on_install,
@@ -113,6 +121,7 @@ class SlurmctldCharm(CharmBase):
 
             self._slurmctld.enable()
             self._slurmctld.munge.enable()
+            self._slurmctld.exporter.enable()
             self.slurm_installed = True
         except slurm.SlurmOpsError as e:
             self.unit.status = BlockedStatus("error installing slurmctld. check log for more info")

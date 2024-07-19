@@ -10,7 +10,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 
 import charms.hpc_libs.v0.slurm_ops as slurm
-from constants import CHARM_MAINTAINED_SLURM_CONF_PARAMETERS, SLURM_CONF_PATH
+from constants import CHARM_MAINTAINED_SLURM_CONF_PARAMETERS, SLURM_CONF_PATH, SNAP_COMMON
 from interface_slurmd import (
     PartitionAvailableEvent,
     PartitionUnavailableEvent,
@@ -112,6 +112,7 @@ class SlurmctldCharm(CharmBase):
             self._legacy_manager.write_jwt_rsa(jwt_rsa)
 
             self._slurmctld.enable()
+            self._slurmctld.munge.enable()
             self.slurm_installed = True
         except slurm.SlurmOpsError as e:
             self.unit.status = BlockedStatus("error installing slurmctld. check log for more info")
@@ -297,7 +298,7 @@ class SlurmctldCharm(CharmBase):
             accounting_params = {
                 "AccountingStorageHost": slurmdbd_host,
                 "AccountingStorageType": "accounting_storage/slurmdbd",
-                "AccountingStoragePass": "/var/run/munge/munge.socket.2",
+                "AccountingStoragePass": f"{SNAP_COMMON}/run/munge/munged.socket.2",
                 "AccountingStoragePort": "6819",
             }
 
@@ -350,11 +351,9 @@ class SlurmctldCharm(CharmBase):
             self.unit.status = BlockedStatus("Error installing slurmctld")
             return False
 
-        # FIXME: Returns false because systemd is looking for the
-        #   `munge.service` file and not the snap one.
-        # if not self._legacy_manager.check_munged():
-        #     self.unit.status = BlockedStatus("Error configuring munge key")
-        #     return False
+        if not self._legacy_manager.check_munged():
+            self.unit.status = BlockedStatus("Error configuring munge key")
+            return False
 
         self.unit.status = ActiveStatus("")
         return True
@@ -396,7 +395,7 @@ class SlurmctldCharm(CharmBase):
     @property
     def hostname(self) -> str:
         """Return the hostname."""
-        return self._legacy_manager.hostname
+        return self._slurmctld.hostname
 
     @property
     def _slurmd_ingress_address(self) -> str:

@@ -67,7 +67,7 @@ class LegacySlurmctldManager:
 
     def check_munged(self) -> bool:
         """Check if munge is working correctly."""
-        if not systemd.service_running("munge"):
+        if not systemd.service_running("snap.slurm.munged"):
             return False
 
         output = ""
@@ -75,11 +75,14 @@ class LegacySlurmctldManager:
         try:
             logger.debug("## Testing if munge is working correctly")
             munge = subprocess.Popen(
-                ["munge", "-n"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                ["slurm.munge", "-n"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             if munge is not None:
                 unmunge = subprocess.Popen(
-                    ["unmunge"], stdin=munge.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    ["slurm.unmunge"],
+                    stdin=munge.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
                 output = unmunge.communicate()[0].decode()
             if "Success" in output:

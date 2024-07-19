@@ -5,18 +5,18 @@
 
 from pathlib import Path
 
-_SNAP_COMMON = Path("/var/snap/slurm/common")
+SNAP_COMMON = Path("/var/snap/slurm/common")
 
 SLURM_USER = "root"
 SLURM_GROUP = "root"
-SLURM_CONF_PATH = _SNAP_COMMON / "etc/slurm/slurm.conf"
-CGROUP_CONF_PATH = _SNAP_COMMON / "etc/slurm/cgroup.conf"
-JWT_KEY_PATH = _SNAP_COMMON / "var/lib/slurm/slurmctld/jwt_hs256.key"
+SLURM_CONF_PATH = SNAP_COMMON / "etc/slurm/slurm.conf"
+CGROUP_CONF_PATH = SNAP_COMMON / "etc/slurm/cgroup.conf"
+JWT_KEY_PATH = SNAP_COMMON / "var/lib/slurm/slurmctld/jwt_hs256.key"
 
 CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "AuthAltParameters": f"jwt_key={JWT_KEY_PATH}",
     "AuthAltTypes": "auth/jwt",
-    "AuthInfo": f"{_SNAP_COMMON}/run/munge/munged.socket.2",
+    "AuthInfo": f"{SNAP_COMMON}/run/munge/munged.socket.2",
     "AuthType": "auth/munge",
     "GresTypes": "gpu",
     "HealthCheckInterval": "600",
@@ -27,13 +27,13 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "SelectType": "select/cons_tres",
     "SlurmctldPort": "6817",
     "SlurmdPort": "6818",
-    "StateSaveLocation": f"{_SNAP_COMMON}/var/lib/slurm/slurmctld",
-    "SlurmdSpoolDir": f"{_SNAP_COMMON}/var/lib/slurm/slurmd",
+    "StateSaveLocation": f"{SNAP_COMMON}/var/lib/slurm/slurmctld",
+    "SlurmdSpoolDir": f"{SNAP_COMMON}/var/lib/slurm/slurmd",
     "SlurmctldParameters": "enable_configless",
-    "SlurmctldLogFile": f"{_SNAP_COMMON}/var/log/slurm/slurmctld.log",
-    "SlurmdLogFile": f"{_SNAP_COMMON}/var/log/slurm/slurmd.log",
-    "SlurmdPidFile": f"{_SNAP_COMMON}/run/slurmd.pid",
-    "SlurmctldPidFile": f"{_SNAP_COMMON}/run/slurmctld.pid",
+    "SlurmctldLogFile": f"{SNAP_COMMON}/var/log/slurm/slurmctld.log",
+    "SlurmdLogFile": f"{SNAP_COMMON}/var/log/slurm/slurmd.log",
+    "SlurmdPidFile": f"{SNAP_COMMON}/run/slurmd.pid",
+    "SlurmctldPidFile": f"{SNAP_COMMON}/run/slurmctld.pid",
     "SlurmUser": SLURM_USER,
     "SlurmdUser": "root",
     "RebootProgram": '"/usr/sbin/reboot --reboot"',

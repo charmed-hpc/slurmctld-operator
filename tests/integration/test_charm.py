@@ -103,7 +103,9 @@ async def test_build_and_deploy_against_edge(
     await ops_test.model.integrate(f"{SLURMDBD}:database", f"{SLURMDBD}-{ROUTER}:database")
     # Reduce the update status frequency to accelerate the triggering of deferred events.
     async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[SLURMCTLD], status="active", timeout=1000)
+        await ops_test.model.wait_for_idle(
+            apps=[SLURMCTLD, SLURMD, SLURMDBD, SLURMRESTD], status="active", timeout=2000
+        )
         assert ops_test.model.applications["slurmctld"].units[0].workload_status == "active"
 
 
@@ -118,7 +120,7 @@ async def test_slurmctld_is_active(ops_test: OpsTest) -> None:
     """Test that slurmctld is active inside Juju unit."""
     logger.info("Checking that slurmctld is active inside Juju unit")
     slurmctld_unit = ops_test.model.applications["slurmctld"].units[0]
-    res = (await slurmctld_unit.ssh("systemctl is-active slurmctld")).strip("\n")
+    res = (await slurmctld_unit.ssh("systemctl is-active snap.slurm.slurmctld")).strip("\n")
     assert res == "active"
 
 
@@ -148,5 +150,5 @@ async def test_munge_is_active(ops_test: OpsTest) -> None:
     """Test that munge is active inside Juju unit."""
     logger.info("Checking that munge is active inside Juju unit")
     slurmctld_unit = ops_test.model.applications["slurmctld"].units[0]
-    res = (await slurmctld_unit.ssh("systemctl is-active munge")).strip("\n")
+    res = (await slurmctld_unit.ssh("systemctl is-active snap.slurm.munged")).strip("\n")
     assert res == "active"
